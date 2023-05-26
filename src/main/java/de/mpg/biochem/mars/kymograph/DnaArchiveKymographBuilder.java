@@ -32,10 +32,9 @@ package de.mpg.biochem.mars.kymograph;
 import de.mpg.biochem.mars.molecule.*;
 import ij.ImagePlus;
 import ij.gui.Line;
-import ij.plugin.frame.RoiManager;
 import net.imagej.Dataset;
 
-import net.imagej.ops.OpService;
+
 import net.imglib2.Interval;
 import net.imglib2.util.Intervals;
 import org.scijava.Context;
@@ -43,7 +42,7 @@ import org.scijava.convert.ConvertService;
 import org.scijava.plugin.Parameter;
 
 import net.imagej.ImgPlus;
-import org.scijava.ui.UIService;
+
 
 public class DnaArchiveKymographBuilder
 {
@@ -52,9 +51,6 @@ public class DnaArchiveKymographBuilder
 
     @Parameter
     private ConvertService convertService;
-
-    @Parameter
-    private UIService uiService;
 
     private DnaMoleculeArchive dnaMoleculeArchive;
 
@@ -78,17 +74,18 @@ public class DnaArchiveKymographBuilder
         return this;
     }
 
-    public void setWidth(int width) {
+    public DnaArchiveKymographBuilder setWidth(int width) {
         this.width = width;
+        return this;
     }
 
     public Dataset build() {
         MarsIntervalExporter exporter = new MarsIntervalExporter(context, dnaMoleculeArchive);
 
-        final int minX = (int)Math.min(dnaMolecule.getParameter("Dna_Top_X1"), dnaMolecule.getParameter("Dna_Bottom_X2")) - 5;
-        final int maxX = (int)Math.max(dnaMolecule.getParameter("Dna_Top_X1"), dnaMolecule.getParameter("Dna_Bottom_X2")) + 5;
-        final int minY = (int)Math.min(dnaMolecule.getParameter("Dna_Top_Y1"), dnaMolecule.getParameter("Dna_Bottom_Y2")) - 5;
-        final int maxY = (int)Math.max(dnaMolecule.getParameter("Dna_Top_Y1"), dnaMolecule.getParameter("Dna_Bottom_Y2")) + 5;
+        final int minX = (int)Math.min(dnaMolecule.getParameter("Dna_Top_X1"), dnaMolecule.getParameter("Dna_Bottom_X2")) - 10;
+        final int maxX = (int)Math.max(dnaMolecule.getParameter("Dna_Top_X1"), dnaMolecule.getParameter("Dna_Bottom_X2")) + 10;
+        final int minY = (int)Math.min(dnaMolecule.getParameter("Dna_Top_Y1"), dnaMolecule.getParameter("Dna_Bottom_Y2")) - 10;
+        final int maxY = (int)Math.max(dnaMolecule.getParameter("Dna_Top_Y1"), dnaMolecule.getParameter("Dna_Bottom_Y2")) + 10;
 
         Interval interval = Intervals.createMinMax(minX, minY, maxX, maxY);
         ImgPlus imgPlus = exporter.setMolecule(dnaMolecule).setInterval(interval).build();
@@ -97,11 +94,6 @@ public class DnaArchiveKymographBuilder
                 dnaMolecule.getParameter("Dna_Top_Y1") - minY,
                 dnaMolecule.getParameter("Dna_Bottom_X2") - minX,
                 dnaMolecule.getParameter("Dna_Bottom_Y2") - minY);
-
-        System.out.println((dnaMolecule.getParameter("Dna_Top_X1") - minX) + " " +
-                (dnaMolecule.getParameter("Dna_Top_Y1") - minY) + " " +
-                (dnaMolecule.getParameter("Dna_Bottom_X2") - minX) + " " +
-                (dnaMolecule.getParameter("Dna_Bottom_Y2") - minY));
 
         // Build lines from the ROI
         LinesBuilder linesBuilder = new LinesBuilder(line);
