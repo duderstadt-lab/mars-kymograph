@@ -42,12 +42,12 @@ public class ImageFormatter {
         cToLUTName = new HashMap<>();
     }
 
-    public ImageFormatter setMin(int c, double min) {
+    public ImageFormatter setDisplayRangeMin(int c, double min) {
         displayRangeCtoMin.put(c, min);
         return this;
     }
 
-    public ImageFormatter setMax(int c, double min) {
+    public ImageFormatter setDisplayRangeMax(int c, double min) {
         displayRangeCtoMax.put(c, min);
         return this;
     }
