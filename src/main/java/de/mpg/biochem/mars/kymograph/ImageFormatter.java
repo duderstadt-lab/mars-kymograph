@@ -11,6 +11,7 @@ import org.scijava.convert.ConvertService;
 import org.scijava.log.LogService;
 import org.scijava.plugin.Parameter;
 
+import java.awt.*;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -18,13 +19,8 @@ import java.io.ByteArrayOutputStream;
 
 import java.util.*;
 
-import java.awt.Graphics;
-import java.awt.Graphics2D;
-import java.awt.BasicStroke;
 import java.awt.geom.Point2D;
 import java.awt.geom.AffineTransform;
-import java.awt.Color;
-import java.awt.Font;
 import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
 
@@ -44,24 +40,23 @@ public class ImageFormatter {
     private final Map<Integer, Double> displayRangeCtoMin, displayRangeCtoMax;
     private final Map<Integer, String> cToLUTName;
     private String htmlEncodedImage;
-
-    //private int leftMargin = 100;
     private int leftRightMargin = 50;
     private int topBottomMargin = 50;
-    //private int topMargin = 0;
 
     private int fullWidth;
     private int fullHeight;
 
-    private String xAxisLabel = "x";
+    private String xAxisLabel = "";
 
-    private String yAxisLabel = "y";
+    private String yAxisLabel = "";
 
-    private String plotTitle = "title";
+    private String title = "";
 
     private int xaxis_precision = 0;
 
     private int yaxis_precision = 0;
+
+    private int rescaleFactor = 1;
 
     public ImageFormatter(Context context, Dataset kymograph) {
         context.inject(this);
@@ -86,6 +81,46 @@ public class ImageFormatter {
         return this;
     }
 
+    public ImageFormatter setRescale(int rescaleFactor) {
+        this.rescaleFactor = rescaleFactor;
+        return this;
+    }
+
+    public ImageFormatter setTimeAxisLabel(String timeAxisLabel) {
+        this.xAxisLabel = timeAxisLabel;
+        return this;
+    }
+
+    public ImageFormatter setVerticalAxisLabel(String verticalAxisLabel) {
+        this.yAxisLabel = verticalAxisLabel;
+        return this;
+    }
+
+    public ImageFormatter setTitle(String title) {
+        this.title = title;
+        return this;
+    }
+
+    public ImageFormatter setTimeAxisPrecision(int timeAxisPrecision) {
+        this.xaxis_precision = timeAxisPrecision;
+        return this;
+    }
+
+    public ImageFormatter setVerticalAxisPrecision(int verticalAxisPrecision) {
+        this.yaxis_precision = verticalAxisPrecision;
+        return this;
+    }
+
+    public ImageFormatter setHorizontalMargin(int horizontalMargin) {
+        this.leftRightMargin = horizontalMargin;
+        return this;
+    }
+
+    public ImageFormatter setVerticalMargin(int verticalMargin) {
+        this.topBottomMargin = verticalMargin;
+        return this;
+    }
+
     public void build() {
         IJ.run(imp, "Make Composite", "");
         for (int c=1; c<=imp.getNChannels(); c++) {
@@ -103,8 +138,8 @@ public class ImageFormatter {
             else if (c == 3)
                 IJ.run(imp, "Green", "");
         }
-        int scaleFactor = (int)Math.ceil(1000/imp.getWidth());
-        imp = imp.resize(imp.getWidth()*scaleFactor, imp.getHeight()*scaleFactor, 1, "none");
+        //scaleFactor = (int)Math.ceil(1000/imp.getWidth());
+        imp = imp.resize(imp.getWidth()*rescaleFactor, imp.getHeight()*rescaleFactor, 1, "none");
 
         fullWidth = imp.getWidth() + leftRightMargin*2;
         fullHeight = imp.getHeight() + topBottomMargin*2;
@@ -116,14 +151,10 @@ public class ImageFormatter {
         g.dispose();
 
         try {
-            //String tempFilePath = System.getProperty("java.io.tmpdir") + "temp_mars_kymograph_" + MarsMath.getUUID58() + ".png";
-            //ImageIO.write(image, "PNG", new File(tempFilePath));
-
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             ImageIO.write(image, "png", baos);
             byte[] bytes = baos.toByteArray();
 
-            //byte[] fileContent = Files.readAllBytes(new File(tempFilePath).toPath());
             htmlEncodedImage = "data:image/png;base64," + Base64.getEncoder().encodeToString(bytes);
         } catch (IOException e) {
             logService.error(e);
@@ -138,9 +169,9 @@ public class ImageFormatter {
         int width = fullWidth - leftRightMargin * 2;
         int height = fullHeight - topBottomMargin * 2;
 
-        Font font = new Font("Arial", Font.PLAIN, 14);
-        Font label_font = new Font("Arial", Font.PLAIN, 14);
-        Font title_font = new Font("Arial", Font.PLAIN, 14);
+        Font font = new Font("Arial", Font.PLAIN, 16);
+        Font label_font = new Font("Arial", Font.PLAIN, 16);
+        Font title_font = new Font("Arial", Font.PLAIN, 16);
 
         Rectangle2D.Double bounds = new Rectangle2D.Double(imgLowerLeftX, imgLowerLeftY, imgWidth, imgHeight);
 
@@ -151,6 +182,8 @@ public class ImageFormatter {
 
         double xStepSize = getStepSize(bounds.width, width / 50);	// draw a number every 50 pixels
         double yStepSize = getStepSize(bounds.height, height / 50);
+
+        g.setFont(font);
 
         for (double x = bounds.x - (bounds.x % xStepSize); x < bounds.x + bounds.width; x += xStepSize) {
             Point2D.Double p = new Point2D.Double(x, 0);
@@ -174,7 +207,7 @@ public class ImageFormatter {
         g2d.drawString(xAxisLabel, leftRightMargin + width / 2 - g.getFontMetrics().stringWidth(xAxisLabel) / 2, topBottomMargin + height + g.getFontMetrics(label_font).getHeight() + g.getFontMetrics(font).getHeight() + 7);
 
         g.setFont(title_font);
-        g2d.drawString(plotTitle, leftRightMargin + width / 2 - g.getFontMetrics().stringWidth(plotTitle) / 2, g.getFontMetrics(title_font).getHeight());
+        g2d.drawString(title, leftRightMargin + width / 2 - g.getFontMetrics().stringWidth(title) / 2, g.getFontMetrics(title_font).getHeight());
 
         g.setFont(font);
 
