@@ -1,6 +1,5 @@
 package de.mpg.biochem.mars.kymograph;
 
-import de.mpg.biochem.mars.util.MarsMath;
 import net.imagej.Dataset;
 
 import ij.ImagePlus;
@@ -12,9 +11,7 @@ import org.scijava.log.LogService;
 import org.scijava.plugin.Parameter;
 
 import java.awt.*;
-import java.io.File;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.io.ByteArrayOutputStream;
 
 import java.util.*;
@@ -43,13 +40,23 @@ public class ImageFormatter {
     private int leftRightMargin = 50;
     private int topBottomMargin = 50;
 
-    private int fullWidth;
-    private int fullHeight;
+    private int fullWidth, fullHeight, imgPixelWidth, imgPixelHeight;
 
+    private boolean showXAxis = true;
     private String xAxisLabel = "";
+
+    private Rectangle2D.Double bounds;
+
+    private AffineTransform transform;
+    private boolean showYAxis = true;
+    private double xMinValue = 0;
+    private double xMaxValue = 0;
 
     private String yAxisLabel = "";
 
+    private double yMinValue = 0;
+
+    private double yMaxValue = 0;
     private String title = "";
 
     private int xaxis_precision = 0;
@@ -57,6 +64,10 @@ public class ImageFormatter {
     private int yaxis_precision = 0;
 
     private int rescaleFactor = 1;
+
+    private Font font = new Font("Arial", Font.PLAIN, 16);
+    private Font label_font = new Font("Arial", Font.PLAIN, 16);
+    private Font title_font = new Font("Arial", Font.PLAIN, 16);
 
     public ImageFormatter(Context context, Dataset kymograph) {
         context.inject(this);
@@ -76,6 +87,18 @@ public class ImageFormatter {
         return this;
     }
 
+    public ImageFormatter setXAxisRange(double min, double max) {
+        this.xMinValue = min;
+        this.xMaxValue = max;
+        return this;
+    }
+
+    public ImageFormatter setYAxisRange(double min, double max) {
+        this.yMinValue = min;
+        this.yMaxValue = max;
+        return this;
+    }
+
     public ImageFormatter setLUT(int c, String lut) {
         cToLUTName.put(c, lut);
         return this;
@@ -86,13 +109,13 @@ public class ImageFormatter {
         return this;
     }
 
-    public ImageFormatter setTimeAxisLabel(String timeAxisLabel) {
-        this.xAxisLabel = timeAxisLabel;
+    public ImageFormatter setXAxisLabel(String xAxisLabel) {
+        this.xAxisLabel = xAxisLabel;
         return this;
     }
 
-    public ImageFormatter setVerticalAxisLabel(String verticalAxisLabel) {
-        this.yAxisLabel = verticalAxisLabel;
+    public ImageFormatter setYAxisLabel(String yAxisLabel) {
+        this.yAxisLabel = yAxisLabel;
         return this;
     }
 
@@ -101,13 +124,13 @@ public class ImageFormatter {
         return this;
     }
 
-    public ImageFormatter setTimeAxisPrecision(int timeAxisPrecision) {
-        this.xaxis_precision = timeAxisPrecision;
+    public ImageFormatter setXAxisPrecision(int xAxisPrecision) {
+        this.xaxis_precision = xAxisPrecision;
         return this;
     }
 
-    public ImageFormatter setVerticalAxisPrecision(int verticalAxisPrecision) {
-        this.yaxis_precision = verticalAxisPrecision;
+    public ImageFormatter setYAxisPrecision(int yAxisPrecision) {
+        this.yaxis_precision = yAxisPrecision;
         return this;
     }
 
@@ -118,6 +141,16 @@ public class ImageFormatter {
 
     public ImageFormatter setVerticalMargin(int verticalMargin) {
         this.topBottomMargin = verticalMargin;
+        return this;
+    }
+
+    public ImageFormatter hideXAxis() {
+        this.showXAxis = false;
+        return this;
+    }
+
+    public ImageFormatter hideYAxis() {
+        this.showYAxis = false;
         return this;
     }
 
@@ -147,7 +180,23 @@ public class ImageFormatter {
         BufferedImage image = new BufferedImage(fullWidth, fullHeight, BufferedImage.TYPE_INT_ARGB);
         Graphics g = image.createGraphics();
         g.drawImage(imp.getBufferedImage(), leftRightMargin, topBottomMargin, null);
-        paintAxis(g, 0, 0, 100, 27);
+
+        imgPixelWidth = fullWidth - leftRightMargin * 2;
+        imgPixelHeight = fullHeight - topBottomMargin * 2;
+
+        bounds = new Rectangle2D.Double(xMinValue, yMinValue, xMaxValue - xMinValue, yMaxValue - yMinValue);
+
+        transform = new AffineTransform();
+        transform.translate(leftRightMargin, topBottomMargin + imgPixelHeight);
+        transform.scale(imgPixelWidth / bounds.width, -imgPixelHeight / bounds.height);
+        transform.translate(-bounds.x, -bounds.y);
+
+        if (showXAxis) paintXAxis(g);
+        if (showYAxis) paintYAxis(g);
+        //add title
+        g.setFont(title_font);
+        ((Graphics2D) g).drawString(title, leftRightMargin + imgPixelWidth / 2 - g.getFontMetrics().stringWidth(title) / 2, g.getFontMetrics(title_font).getHeight());
+
         g.dispose();
 
         try {
@@ -161,27 +210,11 @@ public class ImageFormatter {
         }
     }
 
-    private void paintAxis(Graphics g, int imgLowerLeftX, int imgLowerLeftY, int imgWidth, int imgHeight) {
+    private void paintXAxis(Graphics g) {
         Graphics2D g2d = (Graphics2D) g;
-
         g2d.setStroke(new BasicStroke(2.0f));
 
-        int width = fullWidth - leftRightMargin * 2;
-        int height = fullHeight - topBottomMargin * 2;
-
-        Font font = new Font("Arial", Font.PLAIN, 16);
-        Font label_font = new Font("Arial", Font.PLAIN, 16);
-        Font title_font = new Font("Arial", Font.PLAIN, 16);
-
-        Rectangle2D.Double bounds = new Rectangle2D.Double(imgLowerLeftX, imgLowerLeftY, imgWidth, imgHeight);
-
-        AffineTransform transform = new AffineTransform();
-        transform.translate(leftRightMargin, topBottomMargin + height);
-        transform.scale(width / bounds.width, -height / bounds.height);
-        transform.translate(-bounds.x, -bounds.y);
-
-        double xStepSize = getStepSize(bounds.width, width / 50);	// draw a number every 50 pixels
-        double yStepSize = getStepSize(bounds.height, height / 50);
+        double xStepSize = getStepSize(bounds.width, imgPixelWidth / 50);	// draw a number every 50 pixels
 
         g.setFont(font);
 
@@ -191,23 +224,28 @@ public class ImageFormatter {
 
             if (p.x > leftRightMargin) {
                 g2d.setColor(Color.BLACK);
-                g2d.drawLine((int)p.x, topBottomMargin + height, (int)p.x, topBottomMargin + height + 5);
-                g2d.drawString(String.format("%." + xaxis_precision + "f", x), (int)p.x - g.getFontMetrics(font).stringWidth(String.format("%." + xaxis_precision + "f", x))/2, topBottomMargin + height + g.getFontMetrics(font).getHeight() + 2);
+                g2d.drawLine((int)p.x, topBottomMargin + imgPixelHeight, (int)p.x, topBottomMargin + imgPixelHeight + 5);
+                g2d.drawString(String.format("%." + xaxis_precision + "f", x), (int)p.x - g.getFontMetrics(font).stringWidth(String.format("%." + xaxis_precision + "f", x))/2, topBottomMargin + imgPixelHeight + g.getFontMetrics(font).getHeight() + 2);
             }
         }
 
         g.setFont(label_font);
 
         AffineTransform at = g2d.getTransform();
-        g2d.translate(g.getFontMetrics(label_font).getHeight(), topBottomMargin + height / 2 + g.getFontMetrics().stringWidth(yAxisLabel) / 2);
+        g2d.translate(g.getFontMetrics(label_font).getHeight(), topBottomMargin + imgPixelHeight / 2 + g.getFontMetrics().stringWidth(yAxisLabel) / 2);
         g2d.rotate(-Math.PI / 2);
         g2d.drawString(yAxisLabel, 0, 0);
         g2d.setTransform(at);
 
-        g2d.drawString(xAxisLabel, leftRightMargin + width / 2 - g.getFontMetrics().stringWidth(xAxisLabel) / 2, topBottomMargin + height + g.getFontMetrics(label_font).getHeight() + g.getFontMetrics(font).getHeight() + 7);
+        g2d.drawString(xAxisLabel, leftRightMargin + imgPixelWidth / 2 - g.getFontMetrics().stringWidth(xAxisLabel) / 2, topBottomMargin + imgPixelHeight + g.getFontMetrics(label_font).getHeight() + g.getFontMetrics(font).getHeight() + 7);
 
-        g.setFont(title_font);
-        g2d.drawString(title, leftRightMargin + width / 2 - g.getFontMetrics().stringWidth(title) / 2, g.getFontMetrics(title_font).getHeight());
+    }
+
+    private void paintYAxis(Graphics g) {
+        Graphics2D g2d = (Graphics2D) g;
+        g2d.setStroke(new BasicStroke(2.0f));
+
+        double yStepSize = getStepSize(bounds.height, imgPixelHeight / 50); // draw a number every 50 pixels
 
         g.setFont(font);
 
@@ -215,7 +253,7 @@ public class ImageFormatter {
             Point2D.Double p = new Point2D.Double(0, y);
             transform.transform(p, p);
 
-            if (p.y < height + topBottomMargin) {
+            if (p.y < imgPixelHeight + topBottomMargin) {
                 g2d.setColor(Color.BLACK);
                 g2d.drawLine(leftRightMargin - 5, (int)p.y, leftRightMargin, (int)p.y);
                 g2d.drawString(String.format("%." + yaxis_precision + "f", y), (int)leftRightMargin - g.getFontMetrics(font).stringWidth(String.format("%." + yaxis_precision + "f", y)) - 7, (int)p.y + (int)(g.getFontMetrics(font).getHeight()/3.1));
