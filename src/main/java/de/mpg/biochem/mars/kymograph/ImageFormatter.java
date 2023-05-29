@@ -81,6 +81,36 @@ public class ImageFormatter {
         cToLUTName = new HashMap<>();
     }
 
+    public ImageFormatter setAxisFontSize(int fontSize) {
+        font = new Font("Arial", Font.PLAIN, fontSize);
+        return this;
+    }
+
+    public ImageFormatter setAxisFont(Font axisFont) {
+        font = axisFont;
+        return this;
+    }
+
+    public ImageFormatter setLabelFontSize(int fontSize) {
+        label_font = new Font("Arial", Font.PLAIN, fontSize);
+        return this;
+    }
+
+    public ImageFormatter setLabelFont(Font labelFont) {
+        label_font = labelFont;
+        return this;
+    }
+
+    public ImageFormatter setTitleFontSize(int fontSize) {
+        title_font = new Font("Arial", Font.PLAIN, fontSize);
+        return this;
+    }
+
+    public ImageFormatter setTitleFont(Font titleFont) {
+        font = titleFont;
+        return this;
+    }
+
     public ImageFormatter setDisplayRangeMin(int c, double min) {
         displayRangeCtoMin.put(c, min);
         return this;
