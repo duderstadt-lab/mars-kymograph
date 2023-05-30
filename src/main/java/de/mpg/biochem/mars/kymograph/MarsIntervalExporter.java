@@ -1,6 +1,6 @@
 /*-
  * #%L
- * JavaFX GUI for processing single-molecule TIRF and FMT data in the Structure and Dynamics of Molecular Machines research group.
+ * Mars kymograph builders and formatters.
  * %%
  * Copyright (C) 2018 - 2023 Karl Duderstadt
  * %%
