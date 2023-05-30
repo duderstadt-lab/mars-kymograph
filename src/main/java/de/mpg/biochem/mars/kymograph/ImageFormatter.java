@@ -22,6 +22,7 @@ import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
 
 import javax.imageio.ImageIO;
+import java.io.File;
 
 public class ImageFormatter {
 
@@ -37,6 +38,7 @@ public class ImageFormatter {
     private final Map<Integer, Double> displayRangeCtoMin, displayRangeCtoMax;
     private final Map<Integer, String> cToLUTName;
     private String htmlEncodedImage;
+    private BufferedImage image;
     private int horizontalMargin = 50;
     private int verticalMargin = 50;
     private boolean showXAxis = true;
@@ -214,7 +216,7 @@ public class ImageFormatter {
         int fullWidth = imp.getWidth() + horizontalMargin*2;
         int fullHeight = (channelStack) ? (1 + imp.getNChannels())*imp.getHeight() + imp.getNChannels()*channelStackspacing + verticalMargin*2 : imp.getHeight() + verticalMargin*2;
 
-        BufferedImage image = new BufferedImage(fullWidth, fullHeight, BufferedImage.TYPE_INT_ARGB);
+        image = new BufferedImage(fullWidth, fullHeight, BufferedImage.TYPE_INT_ARGB);
         Graphics g = image.createGraphics();
 
         bounds = new Rectangle2D.Double(xMinValue, yMinValue, xMaxValue - xMinValue, yMaxValue - yMinValue);
@@ -338,5 +340,13 @@ public class ImageFormatter {
 
     public String getHtmlEncodedImage() {
         return this.htmlEncodedImage;
+    }
+
+    public void saveAsPNG(String path) {
+        try {
+            ImageIO.write(image, "png", new File(path));
+        } catch (IOException e) {
+            logService.error(e);
+        }
     }
 }
