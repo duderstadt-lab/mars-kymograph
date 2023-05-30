@@ -74,7 +74,7 @@ public class DnaArchiveKymographBuilder
         return this;
     }
 
-    public DnaArchiveKymographBuilder setWidth(int width) {
+    public DnaArchiveKymographBuilder setProjectionWidth(int width) {
         this.width = width;
         return this;
     }
