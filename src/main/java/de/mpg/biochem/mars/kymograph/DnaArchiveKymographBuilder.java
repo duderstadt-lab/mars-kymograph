@@ -57,6 +57,8 @@ public class DnaArchiveKymographBuilder
 
     private Dataset kymograph;
     private int width = 1;
+    private int minT = -1;
+    private int maxT = -1;
 
     public DnaArchiveKymographBuilder(Context context, DnaMoleculeArchive dnaMoleculeArchive) {
         context.inject(this);
@@ -78,8 +80,21 @@ public class DnaArchiveKymographBuilder
         return this;
     }
 
+    public DnaArchiveKymographBuilder setMinT(int minT) {
+        this.minT = minT;
+        return this;
+    }
+
+    public DnaArchiveKymographBuilder setMaxT(int maxT) {
+        this.maxT = maxT;
+        return this;
+    }
+
     public Dataset build() {
         MarsIntervalExporter exporter = new MarsIntervalExporter(context, dnaMoleculeArchive);
+
+        if (minT != -1) exporter.setMinT(minT);
+        if (maxT != -1) exporter.setMaxT(maxT);
 
         final int minX = (int)Math.min(dnaMolecule.getParameter("Dna_Top_X1"), dnaMolecule.getParameter("Dna_Bottom_X2")) - 10;
         final int maxX = (int)Math.max(dnaMolecule.getParameter("Dna_Top_X1"), dnaMolecule.getParameter("Dna_Bottom_X2")) + 10;
