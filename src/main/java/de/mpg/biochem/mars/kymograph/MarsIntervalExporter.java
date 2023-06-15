@@ -29,6 +29,8 @@
 
 package de.mpg.biochem.mars.kymograph;
 
+import de.mpg.biochem.mars.n5.MarsN5Source;
+import de.mpg.biochem.mars.n5.MarsSingleTimePointN5Source;
 import de.mpg.biochem.mars.metadata.MarsBdvSource;
 import de.mpg.biochem.mars.metadata.MarsMetadata;
 import de.mpg.biochem.mars.molecule.*;
@@ -192,8 +194,8 @@ public class MarsIntervalExporter<T extends NumericType<T> & NativeType<T>> {
 
             int singleTimePoint = source.getSingleTimePoint();
             @SuppressWarnings("unchecked")
-            final MarsSingleTimePointSource<T> n5Source =
-                    new MarsSingleTimePointSource<>((T) Util.getTypeFromInterval(image),
+            final MarsSingleTimePointN5Source<T> n5Source =
+                    new MarsSingleTimePointN5Source<>((T) Util.getTypeFromInterval(image),
                             source.getName(), images, transforms, singleTimePoint);
 
             return n5Source;
@@ -211,7 +213,7 @@ public class MarsIntervalExporter<T extends NumericType<T> & NativeType<T>> {
             }
 
             @SuppressWarnings("unchecked")
-            final MarsSource<T> n5Source = new MarsSource<>((T) Util
+            final MarsN5Source<T> n5Source = new MarsN5Source<>((T) Util
                     .getTypeFromInterval(image), source.getName(), images, transforms);
 
             return n5Source;
