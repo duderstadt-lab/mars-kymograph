@@ -83,7 +83,7 @@
     	<releaseProfiles>sign,deploy-to-scijava</releaseProfiles>
 
     	<mars-core.version>1.0.0-beta-44</mars-core.version>
-		<mars-n5.version>0.1</mars-n5.version>
+		<mars-minio.version>0.1</mars-minio.version>
 
 		<n5-ij.version>3.2.3</n5-ij.version>
 		<n5-imglib2.version>5.0.0</n5-imglib2.version>
@@ -98,8 +98,8 @@
 		</dependency>
 		<dependency>
 			<groupId>de.mpg.biochem</groupId>
-			<artifactId>mars-n5</artifactId>
-			<version>${mars-n5.version}</version>
+			<artifactId>mars-minio</artifactId>
+			<version>${mars-minio.version}</version>
 		</dependency>
 
 		<!-- ImageJ dependencies -->
