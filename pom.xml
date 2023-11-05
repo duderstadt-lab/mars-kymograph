@@ -82,11 +82,8 @@
     	<!-- NB: Deploy releases to the SciJava Maven repository. -->
     	<releaseProfiles>sign,deploy-to-scijava</releaseProfiles>
 
-    	<mars-core.version>1.0.0-beta-44</mars-core.version>
-		<mars-minio.version>0.1</mars-minio.version>
-
-		<n5-ij.version>3.2.3</n5-ij.version>
-		<n5-imglib2.version>5.0.0</n5-imglib2.version>
+    	<mars-core.version>1.0.0-beta-55</mars-core.version>
+		<mars-minio.version>0.2</mars-minio.version>
 	</properties>
 
 	<dependencies>
@@ -162,12 +159,10 @@
 		<dependency>
 			<groupId>org.janelia.saalfeldlab</groupId>
 			<artifactId>n5-ij</artifactId>
-			<version>${n5-ij.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>org.janelia.saalfeldlab</groupId>
 			<artifactId>n5-imglib2</artifactId>
-			<version>${n5-imglib2.version}</version>
 		</dependency>
 	</dependencies>
 
