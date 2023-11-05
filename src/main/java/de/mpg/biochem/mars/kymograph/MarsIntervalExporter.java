@@ -30,6 +30,7 @@
 package de.mpg.biochem.mars.kymograph;
 
 import de.mpg.biochem.mars.n5.MarsN5Source;
+import de.mpg.biochem.mars.n5.MarsN5ViewerReaderFun;
 import de.mpg.biochem.mars.n5.MarsSingleTimePointN5Source;
 import de.mpg.biochem.mars.metadata.MarsBdvSource;
 import de.mpg.biochem.mars.metadata.MarsMetadata;
@@ -152,7 +153,7 @@ public class MarsIntervalExporter<T extends NumericType<T> & NativeType<T>> {
             reader = n5Readers.get(source.getPath());
         }
         else {
-            reader = new N5Importer.N5ViewerReaderFun().apply(source.getPath());
+            reader = new MarsN5ViewerReaderFun().apply(source.getPath());
             n5Readers.put(source.getPath(), reader);
         }
 
