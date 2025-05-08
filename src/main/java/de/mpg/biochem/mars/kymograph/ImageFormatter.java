@@ -2,17 +2,17 @@
  * #%L
  * Mars kymograph builder.
  * %%
- * Copyright (C) 2023 - 2024 Karl Duderstadt
+ * Copyright (C) 2023 Karl Duderstadt
  * %%
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright notice,
  *    this list of conditions and the following disclaimer.
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  *    this list of conditions and the following disclaimer in the documentation
  *    and/or other materials provided with the distribution.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -89,7 +89,7 @@ public class ImageFormatter {
     private double yMinValue = 0;
 
     private double yMaxValue = 0;
-    
+
     private int channelStackspacing = 10;
     private boolean channelStack = false;
     private String title = "";
@@ -99,6 +99,12 @@ public class ImageFormatter {
     private int yaxis_precision = 0;
 
     private int rescaleFactor = 1;
+
+    private boolean darkTheme = false;
+
+    private final Color DARK_THEME_AXIS_COLOR = new Color(0xe0e0e0);
+
+    private final Color LIGHT_THEME_AXIS_COLOR = Color.BLACK;
 
     private Font font = new Font("Arial", Font.PLAIN, 16);
     private Font label_font = new Font("Arial", Font.PLAIN, 16);
@@ -235,6 +241,11 @@ public class ImageFormatter {
         return this;
     }
 
+    public ImageFormatter setDarkTheme(boolean darkTheme) {
+        this.darkTheme = darkTheme;
+        return this;
+    }
+
     public void build() {
         for (int c=1; c<=imp.getNChannels(); c++) {
             imp.setC(c);
@@ -316,7 +327,7 @@ public class ImageFormatter {
             transform.transform(p, p);
 
             if (p.x >= horizontalMargin) {
-                g2d.setColor(Color.BLACK);
+                g2d.setColor((darkTheme) ? DARK_THEME_AXIS_COLOR : LIGHT_THEME_AXIS_COLOR);
                 g2d.drawLine((int)p.x, verticalMargin + imgPixelHeight, (int)p.x, verticalMargin + imgPixelHeight + 5);
                 g2d.drawString(String.format("%." + xaxis_precision + "f", x), (int)p.x - g.getFontMetrics(font).stringWidth(String.format("%." + xaxis_precision + "f", x))/2, verticalMargin + imgPixelHeight + g.getFontMetrics(font).getHeight() + 2);
             }
@@ -339,7 +350,7 @@ public class ImageFormatter {
             transform.transform(p, p);
 
             if (p.y <= imgBottom) {
-                g2d.setColor(Color.BLACK);
+                g2d.setColor((darkTheme) ? DARK_THEME_AXIS_COLOR : LIGHT_THEME_AXIS_COLOR);
                 g2d.drawLine(horizontalMargin - 5, (int)p.y, horizontalMargin, (int)p.y);
                 g2d.drawString(String.format("%." + yaxis_precision + "f", y), (int)horizontalMargin - g.getFontMetrics(font).stringWidth(String.format("%." + yaxis_precision + "f", y)) - 7, (int)p.y + (int)(g.getFontMetrics(font).getHeight()/3.1));
             }
