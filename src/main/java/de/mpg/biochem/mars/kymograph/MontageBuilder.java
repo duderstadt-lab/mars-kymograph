@@ -29,14 +29,11 @@
 
 package de.mpg.biochem.mars.kymograph;
 
-import de.mpg.biochem.mars.molecule.*;
 import net.imagej.Dataset;
 import net.imagej.DatasetService;
 import net.imagej.axis.Axes;
 import net.imagej.axis.AxisType;
-import net.imglib2.Interval;
 import net.imglib2.RandomAccess;
-import net.imglib2.util.Intervals;
 import org.scijava.Context;
 import org.scijava.convert.ConvertService;
 import org.scijava.log.LogService;
@@ -44,16 +41,16 @@ import org.scijava.plugin.Parameter;
 
 import net.imagej.ImgPlus;
 
-public class DnaArchiveMontageBuilder {
+import java.util.ArrayList;
+import java.util.List;
+
+public class MontageBuilder {
     public enum FrameReductionMethod {
         NONE,      // Use all frames
         SKIP,      // Skip frames (e.g., every Nth frame)
         AVERAGE,   // Average groups of frames
         SUM        // Sum groups of frames
     }
-
-    @Parameter
-    private Context context;
 
     @Parameter
     private ConvertService convertService;
@@ -64,12 +61,8 @@ public class DnaArchiveMontageBuilder {
     @Parameter
     private LogService logService;
 
-    private DnaMoleculeArchive dnaMoleculeArchive;
-    private DnaMolecule dnaMolecule;
-
+    private ImgPlus<?> sourceImgPlus;
     private Dataset montage;
-    private int borderWidth = 10;
-    private int borderHeight = 10;
     private int spacing = 5; // Spacing between frames
     private int minT = -1;
     private int maxT = -1;
@@ -79,52 +72,74 @@ public class DnaArchiveMontageBuilder {
     private int reductionFactor = 1; // Used for skipping or grouping frames
     private boolean verticalReflection = false; // Whether to vertically flip the frames
 
-    public DnaArchiveMontageBuilder(Context context, DnaMoleculeArchive dnaMoleculeArchive) {
+    public MontageBuilder(Context context) {
         context.inject(this);
-        this.dnaMoleculeArchive = dnaMoleculeArchive;
     }
 
-    public DnaArchiveMontageBuilder setMolecule(DnaMolecule dnaMolecule) {
-        this.dnaMolecule = dnaMolecule;
+    /**
+     * Set the source image plus to use for building the montage
+     *
+     * @param imgPlus The source image to use
+     * @return This builder for method chaining
+     */
+    public MontageBuilder setSource(ImgPlus<?> imgPlus) {
+        this.sourceImgPlus = imgPlus;
         return this;
     }
 
-    public DnaArchiveMontageBuilder setMolecule(String UID) {
-        this.dnaMolecule = dnaMoleculeArchive.get(UID);
-        return this;
-    }
-
-    public DnaArchiveMontageBuilder setBorderWidth(int width) {
-        this.borderWidth = width;
-        return this;
-    }
-
-    public DnaArchiveMontageBuilder setBorderHeight(int height) {
-        this.borderHeight = height;
-        return this;
-    }
-
-    public DnaArchiveMontageBuilder setSpacing(int spacing) {
+    /**
+     * Set spacing between frames in the montage
+     *
+     * @param spacing The spacing in pixels
+     * @return This builder for method chaining
+     */
+    public MontageBuilder setSpacing(int spacing) {
         this.spacing = spacing;
         return this;
     }
 
-    public DnaArchiveMontageBuilder setMinT(int minT) {
+    /**
+     * Set the minimum time point to include
+     *
+     * @param minT The minimum time point
+     * @return This builder for method chaining
+     */
+    public MontageBuilder setMinT(int minT) {
         this.minT = minT;
         return this;
     }
 
-    public DnaArchiveMontageBuilder setMaxT(int maxT) {
+    /**
+     * Set the maximum time point to include
+     *
+     * @param maxT The maximum time point
+     * @return This builder for method chaining
+     */
+    public MontageBuilder setMaxT(int maxT) {
         this.maxT = maxT;
         return this;
     }
 
-    public DnaArchiveMontageBuilder setHorizontalLayout(boolean horizontal) {
+    /**
+     * Set the layout orientation
+     *
+     * @param horizontal True for horizontal layout (left to right), false for vertical (top to bottom)
+     * @return This builder for method chaining
+     */
+    public MontageBuilder setHorizontalLayout(boolean horizontal) {
         this.horizontalLayout = horizontal;
         return this;
     }
 
-    public DnaArchiveMontageBuilder setColumns(int columns) {
+    /**
+     * Set the number of columns for grid layout
+     * If not set or set to -1, frames will be arranged in a single row or column
+     * based on the layout orientation.
+     *
+     * @param columns Number of columns
+     * @return This builder for method chaining
+     */
+    public MontageBuilder setColumns(int columns) {
         this.columns = columns;
         return this;
     }
@@ -136,7 +151,7 @@ public class DnaArchiveMontageBuilder {
      * @param skipFactor Include every Nth frame (e.g., 5 means include frames 0, 5, 10, etc.)
      * @return This builder for method chaining
      */
-    public DnaArchiveMontageBuilder skipFrames(int skipFactor) {
+    public MontageBuilder skipFrames(int skipFactor) {
         if (skipFactor < 1) {
             skipFactor = 1; // Prevent invalid values
         }
@@ -152,7 +167,7 @@ public class DnaArchiveMontageBuilder {
      * @param groupSize Number of frames to average together
      * @return This builder for method chaining
      */
-    public DnaArchiveMontageBuilder averageFrames(int groupSize) {
+    public MontageBuilder averageFrames(int groupSize) {
         if (groupSize < 1) {
             groupSize = 1; // Prevent invalid values
         }
@@ -168,7 +183,7 @@ public class DnaArchiveMontageBuilder {
      * @param groupSize Number of frames to sum together
      * @return This builder for method chaining
      */
-    public DnaArchiveMontageBuilder sumFrames(int groupSize) {
+    public MontageBuilder sumFrames(int groupSize) {
         if (groupSize < 1) {
             groupSize = 1; // Prevent invalid values
         }
@@ -182,7 +197,7 @@ public class DnaArchiveMontageBuilder {
      *
      * @return This builder for method chaining
      */
-    public DnaArchiveMontageBuilder useAllFrames() {
+    public MontageBuilder useAllFrames() {
         this.reductionMethod = FrameReductionMethod.NONE;
         this.reductionFactor = 1;
         return this;
@@ -194,40 +209,41 @@ public class DnaArchiveMontageBuilder {
      * @param reflect True to vertically reflect frames, false for normal orientation
      * @return This builder for method chaining
      */
-    public DnaArchiveMontageBuilder setVerticalReflection(boolean reflect) {
+    public MontageBuilder setVerticalReflection(boolean reflect) {
         this.verticalReflection = reflect;
         return this;
     }
 
+    /**
+     * Build the montage
+     *
+     * @return The montage dataset
+     */
     public Dataset build() {
-        // Get the source dataset using MarsIntervalExporter
-        MarsIntervalExporter exporter = new MarsIntervalExporter(context, dnaMoleculeArchive);
+        if (sourceImgPlus == null) {
+            logService.error("Source image not set. Use setSource() to set the source image.");
+            return null;
+        }
 
-        if (minT != -1) exporter.setMinT(minT);
-        if (maxT != -1) exporter.setMaxT(maxT);
-
-        // Define the interval around the DNA with borders
-        final int minX = (int)Math.min(dnaMolecule.getParameter("Dna_Top_X1"), dnaMolecule.getParameter("Dna_Bottom_X2")) - borderWidth;
-        final int maxX = (int)Math.max(dnaMolecule.getParameter("Dna_Top_X1"), dnaMolecule.getParameter("Dna_Bottom_X2")) + borderWidth;
-        final int minY = (int)Math.min(dnaMolecule.getParameter("Dna_Top_Y1"), dnaMolecule.getParameter("Dna_Bottom_Y2")) - borderHeight;
-        final int maxY = (int)Math.max(dnaMolecule.getParameter("Dna_Top_Y1"), dnaMolecule.getParameter("Dna_Bottom_Y2")) + borderHeight;
-
-        Interval interval = Intervals.createMinMax(minX, minY, maxX, maxY);
-        ImgPlus imgPlus = exporter.setMolecule(dnaMolecule).setInterval(interval).build();
-
-        // Convert ImgPlus to Dataset
-        Dataset sourceDataset = convertService.convert(imgPlus, Dataset.class);
+        // Get dataset from source
+        Dataset sourceDataset = null;
+        try {
+            sourceDataset = convertService.convert(sourceImgPlus, Dataset.class);
+        } catch (Exception e) {
+            logService.error("Error creating dataset from image: " + e.getMessage());
+            return null;
+        }
 
         // Get dimensions from source dataset
-        int frameWidth = (int)(maxX - minX + 1);
-        int frameHeight = (int)(maxY - minY + 1);
+        int frameWidth = (int)sourceDataset.dimension(sourceDataset.dimensionIndex(Axes.X));
+        int frameHeight = (int)sourceDataset.dimension(sourceDataset.dimensionIndex(Axes.Y));
         int timePoints = (int)sourceDataset.dimension(sourceDataset.dimensionIndex(Axes.TIME));
         int startT = (minT != -1) ? minT : 0;
         int endT = (maxT != -1 && maxT < timePoints) ? maxT : timePoints - 1;
 
         // Apply frame reduction based on the selected method
-        java.util.List<Integer> framesToInclude = new java.util.ArrayList<>();
-        java.util.List<java.util.List<Integer>> frameGroups = new java.util.ArrayList<>();
+        List<Integer> framesToInclude = new ArrayList<>();
+        List<List<Integer>> frameGroups = new ArrayList<>();
 
         switch (reductionMethod) {
             case SKIP:

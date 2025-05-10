@@ -116,7 +116,7 @@ public class DnaArchiveKymographBuilder
 
         Dataset dataset = convertService.convert(imgPlus, net.imagej.Dataset.class);
 
-        KymographCreator creator = new KymographCreator(context, dataset, linesBuilder);
+        KymographBuilder creator = new KymographBuilder(context, dataset, linesBuilder);
         creator.build();
 
         this.kymograph = creator.getProjectedKymograph();

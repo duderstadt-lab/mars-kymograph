@@ -56,7 +56,7 @@ import ij.gui.Line;
  * @author Hadrien Mary
  * @author Karl Duderstadt
  */
-public class KymographCreator {
+public class KymographBuilder {
 
     @Parameter
     private ConvertService convert;
@@ -79,9 +79,8 @@ public class KymographCreator {
     private RandomAccess<?> datasetCursor;
     private RandomAccess<?> kymographCursor;
 
-    public KymographCreator(Context context, Dataset dataset, LinesBuilder linesBuilder)
+    public KymographBuilder(Context context, Dataset dataset, LinesBuilder linesBuilder)
     {
-
         context.inject(this);
         this.linesBuilder = linesBuilder;
         this.dataset = dataset;
