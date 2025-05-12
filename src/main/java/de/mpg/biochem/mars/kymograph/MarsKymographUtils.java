@@ -31,10 +31,29 @@ package de.mpg.biochem.mars.kymograph;
 import net.imagej.ImgPlus;
 import net.imagej.axis.Axes;
 import net.imglib2.*;
+import net.imglib2.algorithm.neighborhood.Neighborhood;
 import net.imglib2.img.ImgFactory;
 import net.imglib2.interpolation.randomaccess.ClampingNLinearInterpolatorFactory;
 import net.imglib2.type.numeric.RealType;
 import net.imglib2.view.Views;
+
+import net.imagej.axis.CalibratedAxis;
+import net.imglib2.Cursor;
+import net.imglib2.RandomAccess;
+import net.imglib2.RandomAccessible;
+import net.imglib2.RandomAccessibleInterval;
+import net.imglib2.algorithm.gauss3.Gauss3;
+import net.imglib2.algorithm.neighborhood.RectangleShape;
+import net.imglib2.exception.IncompatibleTypeException;
+import net.imglib2.img.Img;
+import net.imglib2.util.Util;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 /**
  * Utility class with static methods for a few kymograph related image filtering operations.
@@ -45,6 +64,176 @@ import net.imglib2.view.Views;
  * @author Karl Duderstadt
  */
 public class MarsKymographUtils {
+
+    /**
+     * Apply a median filter to an ImgPlus with multiple time points and channels.
+     *
+     * @param <T>        The pixel type
+     * @param input      The input image
+     * @param radius     The radius of the filter
+     * @param numThreads Number of threads to use (1 for single-threaded)
+     * @return A new ImgPlus with the filtered data
+     */
+    public static <T extends RealType<T>> ImgPlus<T> applyMedianFilter(
+            ImgPlus<T> input, int radius, int numThreads) {
+
+        // Create the filter shape
+        final RectangleShape shape = new RectangleShape(radius, false);
+
+        // Create output image
+        final Img<T> outputImg = createEmptyImgLike(input);
+        final ImgPlus<T> output = wrapWithMetadata(outputImg, input, "Median Filtered");
+
+        // Apply filter to each frame and channel
+        processTimeChannelFrames(input, output, (inputFrame, outputFrame) -> {
+            try {
+                // Manual implementation using neighborhoods
+                final RandomAccessible<Neighborhood<T>> neighborhoods =
+                        shape.neighborhoodsRandomAccessible(Views.extendMirrorSingle(inputFrame));
+                final RandomAccessibleInterval<Neighborhood<T>> neighborhoodsInterval =
+                        Views.interval(neighborhoods, inputFrame);
+
+                // Make the interval iterable
+                final IterableInterval<Neighborhood<T>> iterableNeighborhoods =
+                        Views.iterable(neighborhoodsInterval);
+
+                // Create cursor for neighborhoods
+                final Cursor<Neighborhood<T>> cursor = iterableNeighborhoods.cursor();
+
+                // Create random access for output
+                final RandomAccess<T> outputRA = outputFrame.randomAccess();
+
+                // For each pixel
+                while (cursor.hasNext()) {
+                    final Neighborhood<T> neighborhood = cursor.next();
+                    outputRA.setPosition(cursor);
+
+                    // Collect all values in the neighborhood
+                    List<Double> values = new ArrayList<>();
+                    for (final T value : neighborhood) {
+                        values.add(value.getRealDouble());
+                    }
+
+                    // Sort and find median
+                    Collections.sort(values);
+                    double median = values.size() % 2 == 0 ?
+                            (values.get(values.size() / 2) + values.get(values.size() / 2 - 1)) / 2 :
+                            values.get(values.size() / 2);
+
+                    // Set the output pixel
+                    outputRA.get().setReal(median);
+                }
+
+                return true;
+            } catch (Exception e) {
+                e.printStackTrace();
+                return false;
+            }
+        }, numThreads);
+
+        return output;
+    }
+
+    /**
+     * Apply a Gaussian blur filter to an ImgPlus with multiple time points and channels.
+     *
+     * @param <T>        The pixel type
+     * @param input      The input image
+     * @param sigma      Sigma value for the Gaussian kernel
+     * @param numThreads Number of threads to use (1 for single-threaded)
+     * @return A new ImgPlus with the filtered data
+     */
+    public static <T extends RealType<T>> ImgPlus<T> applyGaussianFilter(
+            ImgPlus<T> input, double sigma, int numThreads) {
+
+        // Create output image
+        final Img<T> outputImg = createEmptyImgLike(input);
+        final ImgPlus<T> output = wrapWithMetadata(outputImg, input, "Gaussian Filtered");
+
+        // Apply filter to each frame and channel
+        processTimeChannelFrames(input, output, (inputFrame, outputFrame) -> {
+            try {
+                // Use Gauss3 for in-place Gaussian filtering
+                double[] sigmas = new double[] { sigma, sigma };
+                Gauss3.gauss(sigmas, Views.extendMirrorSingle(inputFrame), outputFrame);
+                return true;
+            } catch (IncompatibleTypeException e) {
+                e.printStackTrace();
+                return false;
+            }
+        }, numThreads);
+
+        return output;
+    }
+
+    /**
+     * Apply a top-hat filter to an ImgPlus with multiple time points and channels.
+     * The top-hat filter enhances bright features smaller than the specified radius.
+     *
+     * @param <T>        The pixel type
+     * @param input      The input image
+     * @param radius     The radius of the filter
+     * @param numThreads Number of threads to use (1 for single-threaded)
+     * @return A new ImgPlus with the filtered data
+     */
+    public static <T extends RealType<T>> ImgPlus<T> applyTopHatFilter(
+            ImgPlus<T> input, int radius, int numThreads) {
+
+        // Create output image
+        final Img<T> outputImg = createEmptyImgLike(input);
+        final ImgPlus<T> output = wrapWithMetadata(outputImg, input, "TopHat Filtered");
+
+        // Apply filter to each frame and channel
+        processTimeChannelFrames(input, output, (inputFrame, outputFrame) -> {
+            try {
+                // Manual implementation of top-hat filter
+                // Top-hat = original - opening
+                // Opening = dilation(erosion(image))
+
+                // Create a temporary image for erosion
+                final Img<T> erodedImg = createEmptyImgLike(inputFrame);
+                // Create a temporary image for opening (erosion followed by dilation)
+                final Img<T> openedImg = createEmptyImgLike(inputFrame);
+
+                // Define the shape for morphological operations
+                final RectangleShape shape = new RectangleShape(radius, false);
+
+                // 1. Apply erosion manually
+                applyErosion(inputFrame, erodedImg, shape);
+
+                // 2. Apply dilation to the eroded image to get the opening
+                applyDilation(erodedImg, openedImg, shape);
+
+                // 3. Subtract opening from original (top-hat)
+                subtractImages(inputFrame, openedImg, outputFrame);
+
+                return true;
+            } catch (Exception e) {
+                e.printStackTrace();
+                return false;
+            }
+        }, numThreads);
+
+        return output;
+    }
+
+    /**
+     * Convenience methods that use specify one thread when not provided.
+     */
+    public static <T extends RealType<T>> ImgPlus<T> applyMedianFilter(
+            ImgPlus<T> input, int radius) {
+        return applyMedianFilter(input, radius, 1);
+    }
+
+    public static <T extends RealType<T>> ImgPlus<T> applyGaussianFilter(
+            ImgPlus<T> input, double sigma) {
+        return applyGaussianFilter(input, sigma, 1);
+    }
+
+    public static <T extends RealType<T>> ImgPlus<T> applyTopHatFilter(
+            ImgPlus<T> input, int radius) {
+        return applyTopHatFilter(input, radius, 1);
+    }
 
     /**
      * Increases the resolution of a 2D image or a multi-dimensional image in the XY plane.
@@ -91,10 +280,6 @@ public class MarsKymographUtils {
         // Create interpolator factory
         ClampingNLinearInterpolatorFactory<T> interpolatorFactory = new ClampingNLinearInterpolatorFactory<>();
 
-        // Process each channel and time point separately
-        RandomAccessibleInterval<T> inputRAI = input;
-        RandomAccessibleInterval<T> outputRAI = output;
-
         // Determine if we have channel and time dimensions
         int timeDim = input.dimensionIndex(Axes.TIME);
         int channelDim = input.dimensionIndex(Axes.CHANNEL);
@@ -106,24 +291,34 @@ public class MarsKymographUtils {
         // Process each time point and channel
         for (long t = 0; t < timePoints; t++) {
             for (long c = 0; c < channels; c++) {
-                // Extract the current 2D slice
-                RandomAccessibleInterval<T> slice = inputRAI;
-                RandomAccessibleInterval<T> outputSlice = outputRAI;
+                try {
+                    // Extract the current 2D slice
+                    RandomAccessibleInterval<T> slice = input;
+                    RandomAccessibleInterval<T> outputSlice = output;
 
-                // If we have time dimension, get the appropriate hyperslice
-                if (timeDim >= 0) {
-                    slice = Views.hyperSlice(slice, timeDim, t);
-                    outputSlice = Views.hyperSlice(outputSlice, timeDim, t);
+                    // If we have time dimension, get the appropriate hyperslice
+                    if (timeDim >= 0) {
+                        slice = Views.hyperSlice(slice, timeDim, t);
+                        outputSlice = Views.hyperSlice(outputSlice, timeDim, t);
+                    }
+
+                    // If we have channel dimension, get the appropriate hyperslice
+                    if (channelDim >= 0) {
+                        // We need to check if the channel dimension index has changed due to previous hyperslice
+                        int adjustedChannelDim = channelDim;
+                        if (timeDim >= 0 && channelDim > timeDim) {
+                            adjustedChannelDim--;
+                        }
+                        slice = Views.hyperSlice(slice, adjustedChannelDim, c);
+                        outputSlice = Views.hyperSlice(outputSlice, adjustedChannelDim, c);
+                    }
+
+                    // Interpolate the 2D slice
+                    interpolateSlice(slice, outputSlice, xDim, yDim, scaleFactor, interpolatorFactory);
+                } catch (Exception e) {
+                    System.err.println("Error processing time=" + t + ", channel=" + c + ": " + e.getMessage());
+                    throw e; // re-throw to maintain original behavior
                 }
-
-                // If we have channel dimension, get the appropriate hyperslice
-                if (channelDim >= 0) {
-                    slice = Views.hyperSlice(slice, channelDim, c);
-                    outputSlice = Views.hyperSlice(outputSlice, channelDim, c);
-                }
-
-                // Interpolate the 2D slice
-                interpolateSlice(slice, outputSlice, xDim, yDim, scaleFactor, interpolatorFactory);
             }
         }
 
@@ -148,35 +343,386 @@ public class MarsKymographUtils {
         // Create output cursor
         Cursor<T> outputCursor = Views.iterable(output).localizingCursor();
 
-        // Create accessor for the interpolant (using RealRandomAccess instead of RandomAccess)
+        // Create accessor for the interpolant
         RealRandomAccess<T> interpolatedAccess = interpolant.realRandomAccess();
 
-        // Adjust dimensions for reduced dimensionality after hyperslices
-        int dimensionOffset = 0;
-        if (xDim > yDim) {
-            dimensionOffset = 1;
+        // After hyperslices, the dimensions are reduced, so we need to adjust accordingly
+        // For a 2D image after hyperslices, the dimensions should be 0 and 1
+        int adjustedXDim = 0;
+        int adjustedYDim = 1;
+
+        // For images with more than 2 dimensions, we need to adjust
+        if (input.numDimensions() > 2) {
+            // Try to determine correct dimension mapping based on original dimension order
+            if (xDim > yDim) {
+                adjustedXDim = 1;
+                adjustedYDim = 0;
+            }
         }
 
         // For each position in the output image
-        double[] position = new double[output.numDimensions()];
+        double[] inputPosition = new double[input.numDimensions()];
+        long[] outputPos = new long[output.numDimensions()];
+
         while (outputCursor.hasNext()) {
             outputCursor.fwd();
-            outputCursor.localize(position);
 
-            // Calculate input position
-            for (int d = 0; d < position.length; d++) {
-                if (d == xDim - dimensionOffset || d == yDim - dimensionOffset) {
-                    position[d] = position[d] / scaleFactor;
+            // Get cursor position
+            outputCursor.localize(outputPos);
+
+            // Calculate input position (divide by scale factor)
+            for (int d = 0; d < inputPosition.length; d++) {
+                if (d == adjustedXDim || d == adjustedYDim) {
+                    inputPosition[d] = outputPos[d] / scaleFactor;
+                } else {
+                    inputPosition[d] = outputPos[d];
                 }
             }
 
-            // Set interpolated access to calculated position
-            for (int d = 0; d < position.length; d++) {
-                interpolatedAccess.setPosition(position[d], d);  // Using double position instead of long
+            // Set the interpolator to the calculated position
+            for (int d = 0; d < inputPosition.length; d++) {
+                interpolatedAccess.setPosition(inputPosition[d], d);
             }
 
             // Set output value
             outputCursor.get().set(interpolatedAccess.get());
         }
+    }
+
+    // ---- Helper methods ----
+
+    /**
+     * Apply erosion operation manually.
+     */
+    private static <T extends RealType<T>> void applyErosion(
+            RandomAccessibleInterval<T> input, RandomAccessibleInterval<T> output,
+            RectangleShape shape) {
+
+        // Create neighborhood
+        final RandomAccessible<Neighborhood<T>> neighborhoods =
+                shape.neighborhoodsRandomAccessible(Views.extendMirrorSingle(input));
+        final RandomAccessibleInterval<Neighborhood<T>> neighborhoodsInterval =
+                Views.interval(neighborhoods, input);
+
+        // Make it iterable
+        final IterableInterval<Neighborhood<T>> iterableNeighborhoods =
+                Views.iterable(neighborhoodsInterval);
+
+        // Create cursor for neighborhoods
+        final Cursor<Neighborhood<T>> cursor = iterableNeighborhoods.cursor();
+
+        // Create random access for output
+        final RandomAccess<T> outputRA = output.randomAccess();
+
+        // For each pixel
+        while (cursor.hasNext()) {
+            final Neighborhood<T> neighborhood = cursor.next();
+            outputRA.setPosition(cursor);
+
+            // Find minimum value in the neighborhood (erosion)
+            double minValue = Double.MAX_VALUE;
+            for (final T value : neighborhood) {
+                double val = value.getRealDouble();
+                if (val < minValue) {
+                    minValue = val;
+                }
+            }
+
+            // Set the output pixel
+            outputRA.get().setReal(minValue);
+        }
+    }
+
+    /**
+     * Apply dilation operation manually.
+     */
+    private static <T extends RealType<T>> void applyDilation(
+            RandomAccessibleInterval<T> input, RandomAccessibleInterval<T> output,
+            RectangleShape shape) {
+
+        // Create neighborhood
+        final RandomAccessible<Neighborhood<T>> neighborhoods =
+                shape.neighborhoodsRandomAccessible(Views.extendMirrorSingle(input));
+        final RandomAccessibleInterval<Neighborhood<T>> neighborhoodsInterval =
+                Views.interval(neighborhoods, input);
+
+        // Make it iterable
+        final IterableInterval<Neighborhood<T>> iterableNeighborhoods =
+                Views.iterable(neighborhoodsInterval);
+
+        // Create cursor for neighborhoods
+        final Cursor<Neighborhood<T>> cursor = iterableNeighborhoods.cursor();
+
+        // Create random access for output
+        final RandomAccess<T> outputRA = output.randomAccess();
+
+        // For each pixel
+        while (cursor.hasNext()) {
+            final Neighborhood<T> neighborhood = cursor.next();
+            outputRA.setPosition(cursor);
+
+            // Find maximum value in the neighborhood (dilation)
+            double maxValue = -Double.MAX_VALUE;
+            for (final T value : neighborhood) {
+                double val = value.getRealDouble();
+                if (val > maxValue) {
+                    maxValue = val;
+                }
+            }
+
+            // Set the output pixel
+            outputRA.get().setReal(maxValue);
+        }
+    }
+
+    /**
+     * Create an empty image with the same dimensions and type as the input.
+     *
+     * @param <T>   The pixel type
+     * @param input The input image
+     * @return A new empty image with the same dimensions and type
+     */
+    @SuppressWarnings("unchecked")
+    private static <T extends RealType<T>> Img<T> createEmptyImgLike(RandomAccessibleInterval<T> input) {
+        final T type = Util.getTypeFromInterval(input);
+        final ImgFactory<T> factory = Util.getSuitableImgFactory(input, type);
+        return factory.create(input);
+    }
+
+    /**
+     * Wrap an Img with metadata from another ImgPlus.
+     *
+     * @param <T>        The pixel type
+     * @param img        The image to wrap
+     * @param original   The original ImgPlus to copy metadata from
+     * @param nameSuffix Suffix to add to the name
+     * @return A new ImgPlus with the same metadata as the original
+     */
+    private static <T extends RealType<T>> ImgPlus<T> wrapWithMetadata(
+            Img<T> img, ImgPlus<?> original, String nameSuffix) {
+
+        // Collect all axes from the original ImgPlus
+        final CalibratedAxis[] axes = new CalibratedAxis[original.numDimensions()];
+        for (int d = 0; d < original.numDimensions(); d++) {
+            axes[d] = original.axis(d).copy();
+        }
+
+        // Create a new ImgPlus with the original metadata
+        return new ImgPlus<>(img, original.getName() + " (" + nameSuffix + ")", axes);
+    }
+
+    /**
+     * Process each XY frame in a time series with multiple channels using multiple threads.
+     *
+     * @param <T>        The pixel type
+     * @param input      The input ImgPlus
+     * @param output     The output ImgPlus
+     * @param processor  The function to apply to each frame
+     * @param numThreads Number of threads to use (1 for single-threaded)
+     */
+    private static <T extends RealType<T>> void processTimeChannelFrames(
+            ImgPlus<T> input, ImgPlus<T> output,
+            FrameProcessor<T> processor, int numThreads) {
+
+        // Find time and channel axes
+        final int timeAxisIndex = input.dimensionIndex(Axes.TIME);
+        final int channelAxisIndex = input.dimensionIndex(Axes.CHANNEL);
+
+        // Get the number of time points and channels
+        final long numTimePoints = (timeAxisIndex >= 0) ? input.dimension(timeAxisIndex) : 1;
+        final long numChannels = (channelAxisIndex >= 0) ? input.dimension(channelAxisIndex) : 1;
+
+        // Handle single-threaded case separately for simplicity
+        if (numThreads <= 1) {
+            processSingleThreaded(input, output, processor, timeAxisIndex, channelAxisIndex,
+                    numTimePoints, numChannels);
+            return;
+        }
+
+        // Multi-threaded processing
+        processMultiThreaded(input, output, processor, timeAxisIndex, channelAxisIndex,
+                numTimePoints, numChannels, numThreads);
+    }
+
+    /**
+     * Process frames in a single thread.
+     */
+    private static <T extends RealType<T>> void processSingleThreaded(
+            ImgPlus<T> input, ImgPlus<T> output, FrameProcessor<T> processor,
+            int timeAxisIndex, int channelAxisIndex, long numTimePoints, long numChannels) {
+
+        // Process each time point and channel
+        for (int t = 0; t < numTimePoints; t++) {
+            for (int c = 0; c < numChannels; c++) {
+                processFrame(input, output, processor, t, c, timeAxisIndex, channelAxisIndex);
+            }
+        }
+    }
+
+    /**
+     * Process frames using multiple threads.
+     */
+    private static <T extends RealType<T>> void processMultiThreaded(
+            ImgPlus<T> input, ImgPlus<T> output, FrameProcessor<T> processor,
+            int timeAxisIndex, int channelAxisIndex, long numTimePoints, long numChannels,
+            int numThreads) {
+
+        // Create thread pool
+        ExecutorService executor = Executors.newFixedThreadPool(numThreads);
+
+        try {
+            // Create tasks for all frames
+            List<Callable<Void>> tasks = new ArrayList<>();
+            for (int t = 0; t < numTimePoints; t++) {
+                for (int c = 0; c < numChannels; c++) {
+                    final int finalT = t;
+                    final int finalC = c;
+
+                    tasks.add(() -> {
+                        processFrame(input, output, processor, finalT, finalC,
+                                timeAxisIndex, channelAxisIndex);
+                        return null;
+                    });
+                }
+            }
+
+            // Execute all tasks
+            List<Future<Void>> futures = executor.invokeAll(tasks);
+
+            // Wait for all tasks to complete
+            for (Future<Void> future : futures) {
+                try {
+                    future.get(); // Wait for task completion
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            e.printStackTrace();
+        } finally {
+            // Shutdown executor
+            executor.shutdown();
+        }
+    }
+
+    /**
+     * Process a single frame at the specified time point and channel.
+     */
+    private static <T extends RealType<T>> void processFrame(
+            ImgPlus<T> input, ImgPlus<T> output, FrameProcessor<T> processor,
+            int t, int c, int timeAxisIndex, int channelAxisIndex) {
+
+        // Extract the current frame
+        RandomAccessibleInterval<T> inputFrame;
+        RandomAccessibleInterval<T> outputFrame;
+
+        if (timeAxisIndex >= 0 && channelAxisIndex >= 0) {
+            // Both time and channel dimensions exist
+            inputFrame = extractFrame(input, t, c, timeAxisIndex, channelAxisIndex);
+            outputFrame = extractFrame(output, t, c, timeAxisIndex, channelAxisIndex);
+        } else if (timeAxisIndex >= 0) {
+            // Only time dimension exists
+            inputFrame = Views.hyperSlice(input, timeAxisIndex, t);
+            outputFrame = Views.hyperSlice(output, timeAxisIndex, t);
+        } else if (channelAxisIndex >= 0) {
+            // Only channel dimension exists
+            inputFrame = Views.hyperSlice(input, channelAxisIndex, c);
+            outputFrame = Views.hyperSlice(output, channelAxisIndex, c);
+        } else {
+            // Neither time nor channel dimension exists (just a 2D image)
+            inputFrame = input;
+            outputFrame = output;
+        }
+
+        // Apply the frame processor
+        processor.process(inputFrame, outputFrame);
+    }
+
+    /**
+     * Extract a 2D frame from a 4D image (x, y, time, channel).
+     *
+     * @param <T>              The pixel type
+     * @param img              The 4D image
+     * @param t                Time index
+     * @param c                Channel index
+     * @param timeAxisIndex    Index of the time dimension
+     * @param channelAxisIndex Index of the channel dimension
+     * @return A 2D view of the specified frame
+     */
+    private static <T extends RealType<T>> RandomAccessibleInterval<T> extractFrame(
+            RandomAccessibleInterval<T> img, int t, int c,
+            int timeAxisIndex, int channelAxisIndex) {
+
+        // Handle the different possible dimension orderings
+        if (timeAxisIndex < channelAxisIndex) {
+            // Order is: (x, y, time, channel) or similar
+            return Views.hyperSlice(
+                    Views.hyperSlice(img, timeAxisIndex, t),
+                    channelAxisIndex - 1, c);  // -1 because we removed one dimension
+        } else {
+            // Order is: (x, y, channel, time) or similar
+            return Views.hyperSlice(
+                    Views.hyperSlice(img, channelAxisIndex, c),
+                    timeAxisIndex - 1, t);  // -1 because we removed one dimension
+        }
+    }
+
+    /**
+     * Subtract one image from another.
+     *
+     * @param <T>      The pixel type
+     * @param minuend  The image to subtract from
+     * @param subtrahend The image to subtract
+     * @param result   The image to store the result in
+     */
+    private static <T extends RealType<T>> void subtractImages(
+            RandomAccessibleInterval<T> minuend,
+            RandomAccessibleInterval<T> subtrahend,
+            RandomAccessibleInterval<T> result) {
+
+        // Make the input iterable
+        final IterableInterval<T> iterableMinuend = Views.iterable(minuend);
+
+        // Create cursor for input
+        final Cursor<T> minuendCursor = iterableMinuend.cursor();
+
+        // Create random access for other images
+        final RandomAccess<T> subtrahendRA = subtrahend.randomAccess();
+        final RandomAccess<T> resultRA = result.randomAccess();
+
+        // Iterate and subtract
+        while (minuendCursor.hasNext()) {
+            minuendCursor.fwd();
+            subtrahendRA.setPosition(minuendCursor);
+            resultRA.setPosition(minuendCursor);
+
+            // Get values
+            double minuendValue = minuendCursor.get().getRealDouble();
+            double subtrahendValue = subtrahendRA.get().getRealDouble();
+
+            // Subtract and ensure non-negative result
+            double difference = Math.max(0, minuendValue - subtrahendValue);
+
+            // Set result
+            resultRA.get().setReal(difference);
+        }
+    }
+
+    /**
+     * Functional interface for processing a single frame.
+     *
+     * @param <T> The pixel type
+     */
+    @FunctionalInterface
+    private interface FrameProcessor<T extends RealType<T>> {
+        /**
+         * Process a single frame.
+         *
+         * @param input  The input frame
+         * @param output The output frame
+         * @return True if processing was successful, false otherwise
+         */
+        boolean process(RandomAccessibleInterval<T> input, RandomAccessibleInterval<T> output);
     }
 }

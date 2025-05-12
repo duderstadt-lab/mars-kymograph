@@ -33,6 +33,8 @@ import net.imagej.Dataset;
 
 import ij.ImagePlus;
 import ij.IJ;
+import ij.ImageStack;
+import ij.process.ImageProcessor;
 
 import org.scijava.Context;
 import org.scijava.convert.ConvertService;
@@ -109,6 +111,8 @@ public class ImageFormatter {
     private Font font = new Font("Arial", Font.PLAIN, 16);
     private Font label_font = new Font("Arial", Font.PLAIN, 16);
     private Font title_font = new Font("Arial", Font.PLAIN, 16);
+
+    private int singleChannelToShow = -1; // -1 means show all channels
 
     public ImageFormatter(Context context, Dataset kymograph) {
         context.inject(this);
@@ -246,7 +250,31 @@ public class ImageFormatter {
         return this;
     }
 
+    /**
+     * Specifies that only a single channel should be shown in the output.
+     * This will override the channelStack setting if it was enabled.
+     *
+     * @param channelIndex The 1-based index of the channel to show (1 for first channel)
+     * @return This builder for method chaining
+     */
+    public ImageFormatter onlyShowChannel(int channelIndex) {
+        if (channelIndex > 0 && channelIndex <= imp.getNChannels()) {
+            this.singleChannelToShow = channelIndex;
+            // If we're only showing one channel, we don't need stacking
+            this.channelStack = false;
+        } else {
+            logService.warn("Channel index " + channelIndex + " is out of range (1-" + imp.getNChannels() + "). Showing all channels.");
+            this.singleChannelToShow = -1;
+        }
+        return this;
+    }
+
     public void build() {
+        // If only showing a single channel, extract it before proceeding
+        if (singleChannelToShow > 0) {
+            extractSingleChannel();
+        }
+
         for (int c=1; c<=imp.getNChannels(); c++) {
             imp.setC(c);
             updateChannelColor(imp, c);
@@ -297,6 +325,75 @@ public class ImageFormatter {
             htmlEncodedImage = "data:image/png;base64," + Base64.getEncoder().encodeToString(bytes);
         } catch (IOException e) {
             logService.error(e);
+        }
+    }
+
+    /**
+     * Helper method to extract a single channel from a multi-channel image
+     */
+    private void extractSingleChannel() {
+        if (imp.getNChannels() == 1) {
+            // Already a single channel image, nothing to do
+            return;
+        }
+
+        // Save the current position
+        int currentC = imp.getC();
+        int currentZ = imp.getZ();
+        int currentT = imp.getT();
+
+        // Set to the channel we want to extract
+        imp.setC(singleChannelToShow);
+
+        // Create a new image containing only the selected channel
+        int width = imp.getWidth();
+        int height = imp.getHeight();
+        int slices = imp.getNSlices();
+        int frames = imp.getNFrames();
+
+        ImageStack newStack = new ImageStack(width, height);
+
+        for (int t = 1; t <= frames; t++) {
+            for (int z = 1; z <= slices; z++) {
+                imp.setPosition(singleChannelToShow, z, t);
+                ImageProcessor processor = imp.getProcessor().duplicate();
+                newStack.addSlice(processor);
+            }
+        }
+
+        // Create new ImagePlus with the extracted channel
+        ImagePlus newImp = new ImagePlus(imp.getTitle() + " - Channel " + singleChannelToShow, newStack);
+
+        // Set dimensions (now only one channel)
+        newImp.setDimensions(1, slices, frames);
+
+        // Copy display ranges and other important settings
+        if (displayRangeCtoMin.containsKey(singleChannelToShow)) {
+            newImp.setDisplayRange(
+                    displayRangeCtoMin.get(singleChannelToShow),
+                    displayRangeCtoMax.containsKey(singleChannelToShow) ?
+                            displayRangeCtoMax.get(singleChannelToShow) :
+                            imp.getDisplayRangeMax()
+            );
+        }
+
+        // Apply the LUT if specified
+        if (cToLUTName.containsKey(singleChannelToShow)) {
+            IJ.run(newImp, cToLUTName.get(singleChannelToShow), "");
+        }
+
+        // Replace imp with this new single-channel image
+        imp = newImp;
+
+        // Update the maps to refer to channel 1 (the only channel now)
+        if (displayRangeCtoMin.containsKey(singleChannelToShow)) {
+            displayRangeCtoMin.put(1, displayRangeCtoMin.get(singleChannelToShow));
+        }
+        if (displayRangeCtoMax.containsKey(singleChannelToShow)) {
+            displayRangeCtoMax.put(1, displayRangeCtoMax.get(singleChannelToShow));
+        }
+        if (cToLUTName.containsKey(singleChannelToShow)) {
+            cToLUTName.put(1, cToLUTName.get(singleChannelToShow));
         }
     }
 

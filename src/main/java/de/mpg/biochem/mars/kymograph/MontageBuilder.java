@@ -41,6 +41,7 @@ import org.scijava.plugin.Parameter;
 
 import net.imagej.ImgPlus;
 
+import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -50,6 +51,13 @@ public class MontageBuilder {
         SKIP,      // Skip frames (e.g., every Nth frame)
         AVERAGE,   // Average groups of frames
         SUM        // Sum groups of frames
+    }
+
+    public enum ImageFilterMethod {
+        NONE,      // No filter
+        MEDIAN,    // Median filter
+        GAUSSIAN,  // Gaussian filter
+        TOPHAT     // Top-hat filter
     }
 
     @Parameter
@@ -63,14 +71,18 @@ public class MontageBuilder {
 
     private ImgPlus<?> sourceImgPlus;
     private Dataset montage;
-    private int spacing = 5; // Spacing between frames
+    private int spacing = 0; // Spacing between frames
     private int minT = -1;
     private int maxT = -1;
     private boolean horizontalLayout = true; // Default layout is horizontal (frames side by side)
     private int columns = -1; // Number of columns in grid layout (-1 means single row or column based on layout)
     private FrameReductionMethod reductionMethod = FrameReductionMethod.NONE;
     private int reductionFactor = 1; // Used for skipping or grouping frames
+    private ImageFilterMethod filterMethod = ImageFilterMethod.NONE;
+    private double filterSize = 2;
     private boolean verticalReflection = false; // Whether to vertically flip the frames
+    private int numThreads = 1; // Number of threads for filtering operations
+    private double interpolationFactor = 1.0; // Interpolation factor for increasing resolution
 
     public MontageBuilder(Context context) {
         context.inject(this);
@@ -215,6 +227,70 @@ public class MontageBuilder {
     }
 
     /**
+     * Set the filter method to median filter
+     *
+     * @param radius The radius of the median filter
+     * @return This builder for method chaining
+     */
+    public MontageBuilder medianFilter(int radius) {
+        this.filterMethod = ImageFilterMethod.MEDIAN;
+        this.filterSize = radius;
+        return this;
+    }
+
+    /**
+     * Set the filter method to Gaussian filter
+     *
+     * @param sigma The sigma value for the Gaussian filter
+     * @return This builder for method chaining
+     */
+    public MontageBuilder gaussianFilter(double sigma) {
+        this.filterMethod = ImageFilterMethod.GAUSSIAN;
+        this.filterSize = sigma;
+        return this;
+    }
+
+    /**
+     * Set the filter method to top-hat filter
+     *
+     * @param radius The radius of the top-hat filter
+     * @return This builder for method chaining
+     */
+    public MontageBuilder tophatFilter(int radius) {
+        this.filterMethod = ImageFilterMethod.TOPHAT;
+        this.filterSize = radius;
+        return this;
+    }
+
+    /**
+     * Set the number of threads to use for filter operations
+     *
+     * @param numThreads The number of threads
+     * @return This builder for method chaining
+     */
+    public MontageBuilder threads(int numThreads) {
+        if (numThreads < 1) {
+            numThreads = 1;
+        }
+        this.numThreads = numThreads;
+        return this;
+    }
+
+    /**
+     * Enable interpolation to increase resolution
+     *
+     * @param factor The factor by which to increase resolution
+     * @return This builder for method chaining
+     */
+    public MontageBuilder interpolation(double factor) {
+        if (factor <= 0) {
+            factor = 1.0;
+        }
+        this.interpolationFactor = factor;
+        return this;
+    }
+
+    /**
      * Build the montage
      *
      * @return The montage dataset
@@ -232,6 +308,37 @@ public class MontageBuilder {
         } catch (Exception e) {
             logService.error("Error creating dataset from image: " + e.getMessage());
             return null;
+        }
+
+        // Apply filtering if requested
+        ImgPlus<?> processedImgPlus = sourceImgPlus;
+
+        // Apply filter if requested
+        if (filterMethod != ImageFilterMethod.NONE) {
+            try {
+                // Use a helper method to apply the appropriate filter
+                processedImgPlus = applyFilterToImage(processedImgPlus);
+
+                // Update source dataset after filtering
+                sourceDataset = convertService.convert(processedImgPlus, Dataset.class);
+            } catch (Exception e) {
+                logService.error("Error applying filter: " + e.getMessage());
+                e.printStackTrace();
+            }
+        }
+
+        // Apply interpolation if requested
+        if (interpolationFactor > 1.0) {
+            try {
+                // Use a helper method to apply interpolation
+                processedImgPlus = increaseImageResolution(processedImgPlus, interpolationFactor);
+
+                // Update source dataset after interpolation
+                sourceDataset = convertService.convert(processedImgPlus, Dataset.class);
+            } catch (Exception e) {
+                logService.error("Error applying interpolation: " + e.getMessage());
+                e.printStackTrace();
+            }
         }
 
         // Get dimensions from source dataset
@@ -435,5 +542,72 @@ public class MontageBuilder {
 
     public Dataset getMontage() {
         return montage;
+    }
+
+    /**
+     * Helper method to apply the appropriate filter to the image.
+     * Uses generic methods to properly handle type parameters.
+     *
+     * @param image The image to filter
+     * @return The filtered image
+     */
+    @SuppressWarnings("unchecked")
+    private <T extends net.imglib2.type.numeric.RealType<T>> ImgPlus<?> applyFilterToImage(ImgPlus<?> image) {
+        // First check if the input image contains a RealType
+        Object type = image.firstElement();
+        if (!(type instanceof net.imglib2.type.numeric.RealType)) {
+            logService.error("Image does not contain a RealType. Cannot apply filter.");
+            return image;
+        }
+
+        try {
+            // This is a type-safe operation because we've checked the element type
+            ImgPlus<T> typedImage = (ImgPlus<T>) image;
+
+            switch (filterMethod) {
+                case MEDIAN:
+                    return MarsKymographUtils.applyMedianFilter(
+                            typedImage, (int)filterSize, numThreads);
+                case GAUSSIAN:
+                    return MarsKymographUtils.applyGaussianFilter(
+                            typedImage, filterSize, numThreads);
+                case TOPHAT:
+                    return MarsKymographUtils.applyTopHatFilter(
+                            typedImage, (int)filterSize, numThreads);
+                default:
+                    return image; // No filtering needed
+            }
+        } catch (Exception e) {
+            logService.error("Failed to apply filter: " + e.getMessage());
+            return image; // Return original if filtering fails
+        }
+    }
+
+    /**
+     * Helper method to increase image resolution.
+     * Uses generic methods to properly handle type parameters.
+     *
+     * @param image The image to interpolate
+     * @param factor The resolution increase factor
+     * @return The interpolated image
+     */
+    @SuppressWarnings("unchecked")
+    private <T extends net.imglib2.type.numeric.RealType<T>> ImgPlus<?> increaseImageResolution(
+            ImgPlus<?> image, double factor) {
+        // First check if the input image contains a RealType
+        Object type = image.firstElement();
+        if (!(type instanceof net.imglib2.type.numeric.RealType)) {
+            logService.error("Image does not contain a RealType. Cannot increase resolution.");
+            return image;
+        }
+
+        try {
+            // This is a type-safe operation because we've checked the element type
+            ImgPlus<T> typedImage = (ImgPlus<T>) image;
+            return MarsKymographUtils.increaseResolution(typedImage, factor);
+        } catch (Exception e) {
+            logService.error("Failed to increase resolution: " + e.getMessage());
+            return image; // Return original if interpolation fails
+        }
     }
 }
