@@ -55,6 +55,14 @@ import java.awt.image.BufferedImage;
 import javax.imageio.ImageIO;
 import java.io.File;
 
+import org.apache.batik.dom.GenericDOMImplementation;
+import org.apache.batik.svggen.SVGGraphics2D;
+import org.w3c.dom.DOMImplementation;
+import org.w3c.dom.Document;
+import java.io.FileOutputStream;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
+
 public class ImageFormatter {
 
     @Parameter
@@ -101,6 +109,11 @@ public class ImageFormatter {
     private int yaxis_precision = 0;
 
     private int rescaleFactor = 1;
+
+    private float axisLineWidth = 2.0f;
+    private int tickLength = 5;
+    private float tickLineWidth = 2.0f;
+    private Color axisColor = Color.BLACK;
 
     private boolean darkTheme = false;
 
@@ -149,6 +162,50 @@ public class ImageFormatter {
 
     public ImageFormatter setTitleFont(Font titleFont) {
         font = titleFont;
+        return this;
+    }
+
+    /**
+     * Sets the axis line width
+     *
+     * @param width The line width in pixels
+     * @return This builder for method chaining
+     */
+    public ImageFormatter setAxisLineWidth(float width) {
+        this.axisLineWidth = width;
+        return this;
+    }
+
+    /**
+     * Sets the tick mark length
+     *
+     * @param length The length in pixels
+     * @return This builder for method chaining
+     */
+    public ImageFormatter setTickLength(int length) {
+        this.tickLength = length;
+        return this;
+    }
+
+    /**
+     * Sets the tick mark line width
+     *
+     * @param width The line width in pixels
+     * @return This builder for method chaining
+     */
+    public ImageFormatter setTickLineWidth(float width) {
+        this.tickLineWidth = width;
+        return this;
+    }
+
+    /**
+     * Sets the axis color (applies to both axis lines and tick marks)
+     *
+     * @param color The color
+     * @return This builder for method chaining
+     */
+    public ImageFormatter setAxisColor(Color color) {
+        this.axisColor = color;
         return this;
     }
 
@@ -269,6 +326,115 @@ public class ImageFormatter {
         return this;
     }
 
+    /**
+     * Specifies that only certain channels should be shown in the output.
+     * If channelStack is enabled, only the specified channels will be stacked.
+     *
+     * @param channelIndices An array of 1-based indices of the channels to show (1 for first channel)
+     * @return This builder for method chaining
+     */
+    public ImageFormatter onlyShowChannels(int... channelIndices) {
+        if (channelIndices == null || channelIndices.length == 0) {
+            logService.warn("No channel indices provided. Showing all channels.");
+            this.singleChannelToShow = -1;
+            return this;
+        }
+
+        // Validate channel indices
+        for (int index : channelIndices) {
+            if (index <= 0 || index > imp.getNChannels()) {
+                logService.warn("Channel index " + index + " is out of range (1-" + imp.getNChannels() + "). Ignoring.");
+                return this;
+            }
+        }
+
+        // If only one channel requested, use the existing onlyShowChannel method
+        if (channelIndices.length == 1) {
+            return onlyShowChannel(channelIndices[0]);
+        }
+
+        // Extract the specified channels
+        extractMultipleChannels(channelIndices);
+        return this;
+    }
+
+    /**
+     * Helper method to extract multiple channels from a multi-channel image
+     *
+     * @param channelIndices Array of 1-based channel indices to extract
+     */
+    private void extractMultipleChannels(int[] channelIndices) {
+        if (imp.getNChannels() == 1) {
+            // Already a single channel image, nothing to do
+            return;
+        }
+
+        // Save the current position
+        int currentC = imp.getC();
+        int currentZ = imp.getZ();
+        int currentT = imp.getT();
+
+        int width = imp.getWidth();
+        int height = imp.getHeight();
+        int slices = imp.getNSlices();
+        int frames = imp.getNFrames();
+
+        // Create a new stack for the selected channels
+        ImageStack newStack = new ImageStack(width, height);
+
+        // For each time point and Z slice
+        for (int t = 1; t <= frames; t++) {
+            for (int z = 1; z <= slices; z++) {
+                // Add each selected channel to the stack
+                for (int i = 0; i < channelIndices.length; i++) {
+                    int c = channelIndices[i];
+                    imp.setPosition(c, z, t);
+                    ImageProcessor processor = imp.getProcessor().duplicate();
+                    newStack.addSlice(processor);
+                }
+            }
+        }
+
+        // Create new ImagePlus with the extracted channels
+        ImagePlus newImp = new ImagePlus(imp.getTitle() + " - Selected Channels", newStack);
+
+        // Set dimensions (now with only the selected channels)
+        newImp.setDimensions(channelIndices.length, slices, frames);
+
+        // Copy display ranges and LUTs for the selected channels
+        for (int i = 0; i < channelIndices.length; i++) {
+            int oldC = channelIndices[i];
+            int newC = i + 1; // 1-based indexing for new channels
+
+            // Set display range if specified
+            if (displayRangeCtoMin.containsKey(oldC)) {
+                double min = displayRangeCtoMin.get(oldC);
+                double max = displayRangeCtoMax.containsKey(oldC) ?
+                        displayRangeCtoMax.get(oldC) :
+                        imp.getDisplayRangeMax();
+
+                // Store for the new channel index
+                displayRangeCtoMin.put(newC, min);
+                displayRangeCtoMax.put(newC, max);
+            }
+
+            // Transfer LUT settings
+            if (cToLUTName.containsKey(oldC)) {
+                cToLUTName.put(newC, cToLUTName.get(oldC));
+            }
+        }
+
+        // Replace imp with this new multi-channel image
+        imp = newImp;
+
+        // Restore the position as close as possible
+        imp.setPosition(
+                Math.min(currentC, channelIndices.length),
+                Math.min(currentZ, slices),
+                Math.min(currentT, frames)
+        );
+    }
+
     public void build() {
         // If only showing a single channel, extract it before proceeding
         if (singleChannelToShow > 0) {
@@ -285,37 +451,11 @@ public class ImageFormatter {
         int fullHeight = (channelStack) ? (1 + imp.getNChannels())*imp.getHeight() + imp.getNChannels()*channelStackspacing + verticalMargin*2 : imp.getHeight() + verticalMargin*2;
 
         image = new BufferedImage(fullWidth, fullHeight, BufferedImage.TYPE_INT_ARGB);
-        Graphics g = image.createGraphics();
+        Graphics2D g2d = image.createGraphics();
 
-        bounds = new Rectangle2D.Double(xMinValue, yMinValue, xMaxValue - xMinValue, yMaxValue - yMinValue);
-
-        transform = new AffineTransform();
-        transform.translate(horizontalMargin, verticalMargin + imp.getHeight());
-        transform.scale(imp.getWidth() / bounds.width, -imp.getHeight() / bounds.height);
-        transform.translate(-bounds.x, -bounds.y);
-
-        g.drawImage(imp.getBufferedImage(), horizontalMargin, verticalMargin, null);
-        if (showYAxis) paintYAxis(g, verticalMargin, verticalMargin + imp.getHeight());
-        if (showXAxis) paintXAxis(g, imp.getWidth(), fullHeight - verticalMargin*2);
-
-        if (channelStack)
-            for (int c=1; c<=imp.getNChannels(); c++) {
-                transform = new AffineTransform();
-                transform.translate(horizontalMargin, verticalMargin + (c + 1)*imp.getHeight() + c*channelStackspacing);
-                transform.scale(imp.getWidth() / bounds.width, -imp.getHeight() / bounds.height);
-                transform.translate(-bounds.x, -bounds.y);
-
-                imp.setC(c);
-                ImagePlus temp = new ImagePlus("temp image", imp.getChannelProcessor());
-                updateChannelColor(temp, c);
-                g.drawImage(temp.getBufferedImage(), horizontalMargin, verticalMargin + c*(imp.getHeight() + channelStackspacing), null);
-                if (showYAxis) paintYAxis(g, verticalMargin + c*imp.getHeight() + c*channelStackspacing, verticalMargin + (c + 1)*imp.getHeight() + c*channelStackspacing);
-            }
-
-        //add title
-        g.setFont(title_font);
-        ((Graphics2D) g).drawString(title, horizontalMargin + imp.getWidth() / 2 - g.getFontMetrics().stringWidth(title) / 2, g.getFontMetrics(title_font).getHeight());
-        g.dispose();
+        // Draw everything to the bitmap
+        drawToGraphics(g2d);
+        g2d.dispose();
 
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -412,51 +552,133 @@ public class ImageFormatter {
             IJ.run(img, "Green", "");
     }
 
+    /**
+     * Common drawing method used by both bitmap and SVG output
+     *
+     * @param g The graphics context to draw to
+     */
+    private void drawToGraphics(Graphics2D g) {
+        // Setup transformation and bounds
+        bounds = new Rectangle2D.Double(xMinValue, yMinValue, xMaxValue - xMinValue, yMaxValue - yMinValue);
+
+        transform = new AffineTransform();
+        transform.translate(horizontalMargin, verticalMargin + imp.getHeight());
+        transform.scale(imp.getWidth() / bounds.width, -imp.getHeight() / bounds.height);
+        transform.translate(-bounds.x, -bounds.y);
+
+        // Enable anti-aliasing for smoother lines and text
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+
+        // Draw main image
+        g.drawImage(imp.getBufferedImage(), horizontalMargin, verticalMargin, null);
+
+        // Draw axes if enabled
+        if (showYAxis) paintYAxis(g, verticalMargin, verticalMargin + imp.getHeight());
+        if (showXAxis) paintXAxis(g, imp.getWidth(), image.getHeight() - verticalMargin*2);
+
+        // Draw channel stack if enabled
+        if (channelStack) {
+            for (int c=1; c<=imp.getNChannels(); c++) {
+                transform = new AffineTransform();
+                transform.translate(horizontalMargin, verticalMargin + (c + 1)*imp.getHeight() + c*channelStackspacing);
+                transform.scale(imp.getWidth() / bounds.width, -imp.getHeight() / bounds.height);
+                transform.translate(-bounds.x, -bounds.y);
+
+                imp.setC(c);
+                ImagePlus temp = new ImagePlus("temp image", imp.getChannelProcessor());
+                updateChannelColor(temp, c);
+                g.drawImage(temp.getBufferedImage(), horizontalMargin, verticalMargin + c*(imp.getHeight() + channelStackspacing), null);
+                if (showYAxis) paintYAxis(g, verticalMargin + c*imp.getHeight() + c*channelStackspacing, verticalMargin + (c + 1)*imp.getHeight() + c*channelStackspacing);
+            }
+        }
+
+        // Draw title
+        g.setFont(title_font);
+        g.drawString(title, horizontalMargin + imp.getWidth() / 2 - g.getFontMetrics().stringWidth(title) / 2, g.getFontMetrics(title_font).getHeight());
+    }
+
+    /**
+     * Updated X axis painting method with customizable tick marks and colors
+     */
     private void paintXAxis(Graphics g, int imgPixelWidth, int imgPixelHeight) {
         Graphics2D g2d = (Graphics2D) g;
-        g2d.setStroke(new BasicStroke(2.0f));
+        g2d.setStroke(new BasicStroke(axisLineWidth));
 
-        if (Double.isNaN(xStepSize)) xStepSize = getStepSize(bounds.width, imgPixelWidth / 50);	// draw a number every 50 pixels
+        // Use dark theme color or custom axis color
+        Color currentAxisColor = darkTheme ? DARK_THEME_AXIS_COLOR : axisColor;
+        g2d.setColor(currentAxisColor);
+
+        if (Double.isNaN(xStepSize)) xStepSize = getStepSize(bounds.width, imgPixelWidth / 50);
         g.setFont(font);
 
+        // Draw main axis line
+        g2d.drawLine(horizontalMargin, verticalMargin + imgPixelHeight,
+                horizontalMargin + imgPixelWidth, verticalMargin + imgPixelHeight);
+
+        // Draw tick marks and labels
         for (double x = bounds.x - (bounds.x % xStepSize); x < bounds.x + bounds.width; x += xStepSize) {
             Point2D.Double p = new Point2D.Double(x, 0);
             transform.transform(p, p);
 
-            if (p.x >= horizontalMargin) {
-                g2d.setColor((darkTheme) ? DARK_THEME_AXIS_COLOR : LIGHT_THEME_AXIS_COLOR);
-                g2d.drawLine((int)p.x, verticalMargin + imgPixelHeight, (int)p.x, verticalMargin + imgPixelHeight + 5);
-                g2d.drawString(String.format("%." + xaxis_precision + "f", x), (int)p.x - g.getFontMetrics(font).stringWidth(String.format("%." + xaxis_precision + "f", x))/2, verticalMargin + imgPixelHeight + g.getFontMetrics(font).getHeight() + 2);
+            if (p.x >= horizontalMargin && p.x <= horizontalMargin + imgPixelWidth) {
+                g2d.setStroke(new BasicStroke(tickLineWidth));
+                g2d.drawLine((int)p.x, verticalMargin + imgPixelHeight,
+                        (int)p.x, verticalMargin + imgPixelHeight + tickLength);
+
+                String label = String.format("%." + xaxis_precision + "f", x);
+                g2d.drawString(label,
+                        (int)p.x - g.getFontMetrics(font).stringWidth(label)/2,
+                        verticalMargin + imgPixelHeight + tickLength + g.getFontMetrics(font).getHeight());
             }
         }
 
+        // Draw axis label
         g.setFont(label_font);
-        g2d.drawString(xAxisLabel, horizontalMargin + imgPixelWidth / 2 - g.getFontMetrics().stringWidth(xAxisLabel) / 2, verticalMargin + imgPixelHeight + g.getFontMetrics(label_font).getHeight() + g.getFontMetrics(font).getHeight() + 7);
+        g2d.drawString(xAxisLabel,
+                horizontalMargin + imgPixelWidth / 2 - g.getFontMetrics().stringWidth(xAxisLabel) / 2,
+                verticalMargin + imgPixelHeight + tickLength + g.getFontMetrics(font).getHeight() + g.getFontMetrics(label_font).getHeight());
     }
 
+    /**
+     * Updated Y axis painting method with customizable tick marks and colors
+     */
     private void paintYAxis(Graphics g, int imgTop, int imgBottom) {
         int imgPixelHeight = imgBottom - imgTop;
         Graphics2D g2d = (Graphics2D) g;
-        g2d.setStroke(new BasicStroke(2.0f));
+        g2d.setStroke(new BasicStroke(axisLineWidth));
 
-        if (Double.isNaN(yStepSize)) yStepSize = getStepSize(bounds.height, imgPixelHeight / 50); // draw a number every 50 pixels
+        // Use dark theme color or custom axis color
+        Color currentAxisColor = darkTheme ? DARK_THEME_AXIS_COLOR : axisColor;
+        g2d.setColor(currentAxisColor);
+
+        if (Double.isNaN(yStepSize)) yStepSize = getStepSize(bounds.height, imgPixelHeight / 50);
         g.setFont(font);
 
+        // Draw main axis line
+        g2d.drawLine(horizontalMargin, imgTop, horizontalMargin, imgBottom);
+
+        // Draw tick marks and labels
         for (double y = bounds.y - (bounds.y % yStepSize); y < bounds.y + bounds.height; y += yStepSize) {
             Point2D.Double p = new Point2D.Double(0, y);
             transform.transform(p, p);
 
-            if (p.y <= imgBottom) {
-                g2d.setColor((darkTheme) ? DARK_THEME_AXIS_COLOR : LIGHT_THEME_AXIS_COLOR);
-                g2d.drawLine(horizontalMargin - 5, (int)p.y, horizontalMargin, (int)p.y);
-                g2d.drawString(String.format("%." + yaxis_precision + "f", y), (int)horizontalMargin - g.getFontMetrics(font).stringWidth(String.format("%." + yaxis_precision + "f", y)) - 7, (int)p.y + (int)(g.getFontMetrics(font).getHeight()/3.1));
+            if (p.y >= imgTop && p.y <= imgBottom) {
+                g2d.setStroke(new BasicStroke(tickLineWidth));
+                g2d.drawLine(horizontalMargin - tickLength, (int)p.y, horizontalMargin, (int)p.y);
+
+                String label = String.format("%." + yaxis_precision + "f", y);
+                g2d.drawString(label,
+                        horizontalMargin - tickLength - g.getFontMetrics(font).stringWidth(label) - 2,
+                        (int)p.y + g.getFontMetrics(font).getAscent()/2);
             }
         }
 
+        // Draw Y axis label with rotation
         g.setFont(label_font);
-
         AffineTransform at = g2d.getTransform();
-        g2d.translate(g.getFontMetrics(label_font).getHeight(), ((imgTop + imgBottom) / 2) + g.getFontMetrics().stringWidth(yAxisLabel) / 2);
+        g2d.translate(g.getFontMetrics(label_font).getHeight(),
+                (imgTop + imgBottom) / 2 + g.getFontMetrics().stringWidth(yAxisLabel) / 2);
         g2d.rotate(-Math.PI / 2);
         g2d.drawString(yAxisLabel, 0, 0);
         g2d.setTransform(at);
@@ -479,11 +701,36 @@ public class ImageFormatter {
         return this.htmlEncodedImage;
     }
 
-    public void saveAsPNG(String path) {
+    /**
+     * Saves the image as an SVG file using Apache Batik.
+     *
+     * @param path The file path to save to (should end with .svg)
+     */
+    public void saveAsSVG(String path) {
         try {
-            ImageIO.write(image, "png", new File(path));
-        } catch (IOException e) {
-            logService.error(e);
+            // Create an SVG document
+            DOMImplementation domImpl = GenericDOMImplementation.getDOMImplementation();
+            String svgNS = "http://www.w3.org/2000/svg";
+            Document document = domImpl.createDocument(svgNS, "svg", null);
+
+            // Create an SVG generator
+            SVGGraphics2D svgGenerator = new SVGGraphics2D(document);
+
+            // Set dimensions
+            svgGenerator.setSVGCanvasSize(new Dimension(image.getWidth(), image.getHeight()));
+
+            // Draw content
+            drawToGraphics(svgGenerator);
+
+            // Write to file
+            try (Writer out = new OutputStreamWriter(new FileOutputStream(path), "UTF-8")) {
+                svgGenerator.stream(out, true); // true means use CSS style attributes
+            }
+
+            logService.info("SVG saved to: " + path);
+        } catch (Exception e) {
+            logService.error("Failed to save SVG: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 }
