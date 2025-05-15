@@ -389,7 +389,312 @@ public class MarsKymographUtils {
         }
     }
 
-    // ---- Helper methods ----
+    /**
+     * Skips frames in a time series, keeping only every Nth frame.
+     *
+     * @param <T> The pixel type
+     * @param input The input image
+     * @param skipFactor Include every Nth frame (e.g., 5 means include frames 0, 5, 10, etc.)
+     * @return A new ImgPlus with reduced number of frames
+     */
+    public static <T extends RealType<T>> ImgPlus<T> skipFrames(ImgPlus<T> input, int skipFactor) {
+        // Find time axis
+        final int timeAxisIndex = input.dimensionIndex(Axes.TIME);
+
+        // If no time dimension or invalid skip factor, return the original
+        if (timeAxisIndex < 0 || skipFactor <= 1) {
+            return input;
+        }
+
+        // Get dimensions
+        long[] dims = new long[input.numDimensions()];
+        input.dimensions(dims);
+
+        // Calculate new time dimension size
+        long timePoints = dims[timeAxisIndex];
+        long newTimePoints = (timePoints + skipFactor - 1) / skipFactor; // Ceiling division
+
+        // Create new dimensions array
+        long[] newDims = dims.clone();
+        newDims[timeAxisIndex] = newTimePoints;
+
+        // Create output image
+        @SuppressWarnings("unchecked")
+        ImgFactory<T> factory = (ImgFactory<T>) input.factory();
+        Img<T> outputImg = factory.create(newDims, input.firstElement().copy());
+        ImgPlus<T> output = wrapWithMetadata(outputImg, input, "Frames Skipped");
+
+        // Get channel axis if it exists
+        final int channelAxisIndex = input.dimensionIndex(Axes.CHANNEL);
+        final long channels = (channelAxisIndex >= 0) ? dims[channelAxisIndex] : 1;
+
+        // Copy selected frames
+        RandomAccess<T> inputRA = input.randomAccess();
+        RandomAccess<T> outputRA = output.randomAccess();
+
+        // Process each output frame
+        for (int newT = 0; newT < newTimePoints; newT++) {
+            int originalT = newT * skipFactor;
+
+            // Copy this frame to output
+            copyFrame(input, output, inputRA, outputRA, originalT, newT, timeAxisIndex, channelAxisIndex, dims);
+        }
+
+        return output;
+    }
+
+    /**
+     * Averages groups of frames in a time series.
+     *
+     * @param <T> The pixel type
+     * @param input The input image
+     * @param groupSize Number of frames to average together
+     * @return A new ImgPlus with reduced number of frames
+     */
+    public static <T extends RealType<T>> ImgPlus<T> averageFrames(ImgPlus<T> input, int groupSize) {
+        return reduceFrames(input, groupSize, true); // Use average
+    }
+
+    /**
+     * Sums groups of frames in a time series.
+     *
+     * @param <T> The pixel type
+     * @param input The input image
+     * @param groupSize Number of frames to sum together
+     * @return A new ImgPlus with reduced number of frames
+     */
+    public static <T extends RealType<T>> ImgPlus<T> sumFrames(ImgPlus<T> input, int groupSize) {
+        return reduceFrames(input, groupSize, false); // Use sum
+    }
+
+    /**
+     * Helper method to reduce frames by averaging or summing.
+     *
+     * @param <T> The pixel type
+     * @param input The input image
+     * @param groupSize Number of frames to reduce together
+     * @param average If true, average the frames; if false, sum them
+     * @return A new ImgPlus with reduced number of frames
+     */
+    private static <T extends RealType<T>> ImgPlus<T> reduceFrames(ImgPlus<T> input, int groupSize, boolean average) {
+        // Find time axis
+        final int timeAxisIndex = input.dimensionIndex(Axes.TIME);
+
+        // If no time dimension or invalid group size, return the original
+        if (timeAxisIndex < 0 || groupSize <= 1) {
+            return input;
+        }
+
+        // Get dimensions
+        long[] dims = new long[input.numDimensions()];
+        input.dimensions(dims);
+
+        // Calculate new time dimension size
+        long timePoints = dims[timeAxisIndex];
+        long newTimePoints = (timePoints + groupSize - 1) / groupSize; // Ceiling division
+
+        // Create new dimensions array
+        long[] newDims = dims.clone();
+        newDims[timeAxisIndex] = newTimePoints;
+
+        // Create output image
+        @SuppressWarnings("unchecked")
+        ImgFactory<T> factory = (ImgFactory<T>) input.factory();
+        Img<T> outputImg = factory.create(newDims, input.firstElement().copy());
+        ImgPlus<T> output = wrapWithMetadata(outputImg, input, average ? "Frames Averaged" : "Frames Summed");
+
+        // Get channel axis if it exists
+        final int channelAxisIndex = input.dimensionIndex(Axes.CHANNEL);
+        final long channels = (channelAxisIndex >= 0) ? dims[channelAxisIndex] : 1;
+
+        // Get X and Y dimensions
+        final int xAxisIndex = input.dimensionIndex(Axes.X);
+        final int yAxisIndex = input.dimensionIndex(Axes.Y);
+
+        if (xAxisIndex < 0 || yAxisIndex < 0) {
+            // If X or Y axis is not explicitly set, return the original
+            return input;
+        }
+
+        // Process each output frame
+        for (int newT = 0; newT < newTimePoints; newT++) {
+            // Determine the range of frames to process
+            int startFrame = newT * groupSize;
+            int endFrame = Math.min(startFrame + groupSize, (int)timePoints);
+            int actualGroupSize = endFrame - startFrame;
+
+            // For each channel
+            for (int c = 0; c < channels; c++) {
+                // For each pixel position in the X-Y plane
+                for (int y = 0; y < dims[yAxisIndex]; y++) {
+                    for (int x = 0; x < dims[xAxisIndex]; x++) {
+                        // Initialize accumulator
+                        double sum = 0.0;
+
+                        // For each frame in the group
+                        for (int t = startFrame; t < endFrame; t++) {
+                            // Set position for input
+                            long[] pos = new long[input.numDimensions()];
+                            pos[xAxisIndex] = x;
+                            pos[yAxisIndex] = y;
+                            pos[timeAxisIndex] = t;
+                            if (channelAxisIndex >= 0) {
+                                pos[channelAxisIndex] = c;
+                            }
+
+                            // Get value
+                            RandomAccess<T> ra = input.randomAccess();
+                            ra.setPosition(pos);
+                            sum += ra.get().getRealDouble();
+                        }
+
+                        // Calculate final value
+                        double finalValue = average ? sum / actualGroupSize : sum;
+
+                        // Set output position
+                        long[] outPos = new long[output.numDimensions()];
+                        outPos[xAxisIndex] = x;
+                        outPos[yAxisIndex] = y;
+                        outPos[timeAxisIndex] = newT;
+                        if (channelAxisIndex >= 0) {
+                            outPos[channelAxisIndex] = c;
+                        }
+
+                        // Set value
+                        RandomAccess<T> outRA = output.randomAccess();
+                        outRA.setPosition(outPos);
+                        outRA.get().setReal(finalValue);
+                    }
+                }
+            }
+        }
+
+        return output;
+    }
+
+    /**
+     * Applies vertical reflection (flipping) to an image.
+     *
+     * @param <T> The pixel type
+     * @param input The input image
+     * @return A new ImgPlus with vertically flipped frames
+     */
+    public static <T extends RealType<T>> ImgPlus<T> applyVerticalReflection(ImgPlus<T> input) {
+        // Find Y axis
+        final int yAxisIndex = input.dimensionIndex(Axes.Y);
+
+        // If no Y dimension, return the original
+        if (yAxisIndex < 0) {
+            return input;
+        }
+
+        // Get dimensions
+        long[] dims = new long[input.numDimensions()];
+        input.dimensions(dims);
+
+        // Create output image
+        @SuppressWarnings("unchecked")
+        ImgFactory<T> factory = (ImgFactory<T>) input.factory();
+        Img<T> outputImg = factory.create(dims, input.firstElement().copy());
+        ImgPlus<T> output = wrapWithMetadata(outputImg, input, "Vertically Reflected");
+
+        // Get time and channel axes if they exist
+        final int timeAxisIndex = input.dimensionIndex(Axes.TIME);
+        final int channelAxisIndex = input.dimensionIndex(Axes.CHANNEL);
+        final long timePoints = (timeAxisIndex >= 0) ? dims[timeAxisIndex] : 1;
+        final long channels = (channelAxisIndex >= 0) ? dims[channelAxisIndex] : 1;
+
+        // Get X dimension
+        final int xAxisIndex = input.dimensionIndex(Axes.X);
+
+        if (xAxisIndex < 0) {
+            // If X axis is not explicitly set, return the original
+            return input;
+        }
+
+        // Process each frame
+        for (int t = 0; t < timePoints; t++) {
+            for (int c = 0; c < channels; c++) {
+                // For each row in the Y dimension
+                for (int y = 0; y < dims[yAxisIndex]; y++) {
+                    // Calculate the flipped y position
+                    int flippedY = (int)dims[yAxisIndex] - 1 - y;
+
+                    // For each column in the X dimension
+                    for (int x = 0; x < dims[xAxisIndex]; x++) {
+                        // Set position for input
+                        long[] inPos = new long[input.numDimensions()];
+                        inPos[xAxisIndex] = x;
+                        inPos[yAxisIndex] = y;
+                        if (timeAxisIndex >= 0) {
+                            inPos[timeAxisIndex] = t;
+                        }
+                        if (channelAxisIndex >= 0) {
+                            inPos[channelAxisIndex] = c;
+                        }
+
+                        // Set position for output with flipped Y
+                        long[] outPos = inPos.clone();
+                        outPos[yAxisIndex] = flippedY;
+
+                        // Copy value
+                        RandomAccess<T> inRA = input.randomAccess();
+                        RandomAccess<T> outRA = output.randomAccess();
+                        inRA.setPosition(inPos);
+                        outRA.setPosition(outPos);
+                        outRA.get().set(inRA.get());
+                    }
+                }
+            }
+        }
+
+        return output;
+    }
+
+    /**
+     * Helper method to copy a single frame from input to output.
+     */
+    private static <T extends RealType<T>> void copyFrame(
+            ImgPlus<T> input, ImgPlus<T> output,
+            RandomAccess<T> inputRA, RandomAccess<T> outputRA,
+            int srcT, int destT, int timeAxisIndex, int channelAxisIndex, long[] dims) {
+
+        // Get X and Y axes
+        final int xAxisIndex = input.dimensionIndex(Axes.X);
+        final int yAxisIndex = input.dimensionIndex(Axes.Y);
+
+        if (xAxisIndex < 0 || yAxisIndex < 0) {
+            return; // Cannot copy if X or Y axes not found
+        }
+
+        // Get number of channels
+        final long channels = (channelAxisIndex >= 0) ? dims[channelAxisIndex] : 1;
+
+        // For each channel
+        for (int c = 0; c < channels; c++) {
+            // For each pixel position in the X-Y plane
+            for (int y = 0; y < dims[yAxisIndex]; y++) {
+                for (int x = 0; x < dims[xAxisIndex]; x++) {
+                    // Set position for input
+                    long[] pos = new long[input.numDimensions()];
+                    pos[xAxisIndex] = x;
+                    pos[yAxisIndex] = y;
+                    pos[timeAxisIndex] = srcT;
+                    if (channelAxisIndex >= 0) {
+                        pos[channelAxisIndex] = c;
+                    }
+                    inputRA.setPosition(pos);
+
+                    // Set position for output
+                    pos[timeAxisIndex] = destT;
+                    outputRA.setPosition(pos);
+
+                    // Copy value
+                    outputRA.get().set(inputRA.get());
+                }
+            }
+        }
+    }
 
     /**
      * Apply erosion operation manually.
