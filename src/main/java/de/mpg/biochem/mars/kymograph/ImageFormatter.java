@@ -489,18 +489,51 @@ public class ImageFormatter {
 
         // Calculate dimensions based on orientation
         int fullWidth, fullHeight;
+
         if (rightVerticalOrientation || leftVerticalOrientation) {
-            // Swap width and height for vertical orientation
-            fullWidth = imp.getHeight() + horizontalMargin*2;
-            fullHeight = (channelStack) ?
-                    (1 + imp.getNChannels())*imp.getWidth() + imp.getNChannels()*channelStackspacing + verticalMargin*2 :
-                    imp.getWidth() + verticalMargin*2;
+            // For vertical orientation:
+            // - Width becomes: main image column + additional channel columns + margins
+            // - Height becomes: rotated width + margins
+
+            int mainColumnWidth = imp.getHeight(); // After rotation, height becomes width
+
+            if (channelStack && imp.getNChannels() > 1) {
+                // Calculate total width needed for all columns with proper spacing
+                // Main column + spacing + (each channel column + spacing between columns)
+                fullWidth = mainColumnWidth +
+                        // Add initial spacing after main image
+                        channelStackspacing +
+                        // Add width for all channels
+                        (imp.getNChannels() * mainColumnWidth) +
+                        // Add spacing between all channel columns
+                        ((imp.getNChannels() - 1) * channelStackspacing) +
+                        // Add margins
+                        (horizontalMargin * 2);
+
+                // Height is just the rotated width plus margins
+                fullHeight = imp.getWidth() + (verticalMargin * 2);
+            } else {
+                // Single channel or no stacking - just the main column
+                fullWidth = mainColumnWidth + (horizontalMargin * 2);
+                fullHeight = imp.getWidth() + (verticalMargin * 2);
+            }
         } else {
             // Standard horizontal orientation
-            fullWidth = imp.getWidth() + horizontalMargin*2;
-            fullHeight = (channelStack) ?
-                    (1 + imp.getNChannels())*imp.getHeight() + imp.getNChannels()*channelStackspacing + verticalMargin*2 :
-                    imp.getHeight() + verticalMargin*2;
+            if (channelStack && imp.getNChannels() > 1) {
+                fullWidth = imp.getWidth() + (horizontalMargin * 2);
+                fullHeight = imp.getHeight() +
+                        (imp.getNChannels() * imp.getHeight()) +
+                        (imp.getNChannels() * channelStackspacing) +
+                        (verticalMargin * 2);
+            } else {
+                fullWidth = imp.getWidth() + (horizontalMargin * 2);
+                fullHeight = imp.getHeight() + (verticalMargin * 2);
+            }
+        }
+
+        // Add extra height for title if present
+        if (title != null && !title.isEmpty()) {
+            fullHeight += title_font.getSize() + 10; // Add space for title
         }
 
         image = new BufferedImage(fullWidth, fullHeight, BufferedImage.TYPE_INT_ARGB);
@@ -615,10 +648,10 @@ public class ImageFormatter {
         bounds = new Rectangle2D.Double(xMinValue, yMinValue, xMaxValue - xMinValue, yMaxValue - yMinValue);
 
         // Set up the background
-        if (darkTheme) {
-            g.setColor(Color.BLACK);
-            g.fillRect(0, 0, image.getWidth(), image.getHeight());
-        }
+        //if (darkTheme) {
+            //g.setColor(Color.BLACK);
+            //g.fillRect(0, 0, image.getWidth(), image.getHeight());
+        //}
 
         // Enable anti-aliasing for smoother lines and text
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
@@ -654,25 +687,37 @@ public class ImageFormatter {
         // Draw main image
         g.drawImage(imp.getBufferedImage(), horizontalMargin, verticalMargin, null);
 
-        // Draw axes if enabled
+        // Draw y-axis if enabled
         if (showYAxis) paintYAxis(g, verticalMargin, verticalMargin + imp.getHeight());
-        if (showXAxis) paintXAxis(g, imp.getWidth(), image.getHeight() - verticalMargin*2);
+
+        // Track the total height - start with the main image
+        int totalHeight = verticalMargin + imp.getHeight();
 
         // Draw channel stack if enabled
-        if (channelStack) {
+        if (channelStack && imp.getNChannels() > 1) {
             for (int c=1; c<=imp.getNChannels(); c++) {
+                // Calculate the vertical position for this channel
+                int yPos = verticalMargin + c*(imp.getHeight() + channelStackspacing);
+
                 transform = new AffineTransform();
-                transform.translate(horizontalMargin, verticalMargin + (c + 1)*imp.getHeight() + c*channelStackspacing);
+                transform.translate(horizontalMargin, yPos + imp.getHeight());
                 transform.scale(imp.getWidth() / bounds.width, -imp.getHeight() / bounds.height);
                 transform.translate(-bounds.x, -bounds.y);
 
                 imp.setC(c);
                 ImagePlus temp = new ImagePlus("temp image", imp.getChannelProcessor());
                 updateChannelColor(temp, c);
-                g.drawImage(temp.getBufferedImage(), horizontalMargin, verticalMargin + c*(imp.getHeight() + channelStackspacing), null);
-                if (showYAxis) paintYAxis(g, verticalMargin + c*imp.getHeight() + c*channelStackspacing, verticalMargin + (c + 1)*imp.getHeight() + c*channelStackspacing);
+                g.drawImage(temp.getBufferedImage(), horizontalMargin, yPos, null);
+
+                if (showYAxis) paintYAxis(g, yPos, yPos + imp.getHeight());
+
+                // Update the total height
+                totalHeight = yPos + imp.getHeight();
             }
         }
+
+        // Now draw the x-axis at the bottom of all images
+        if (showXAxis) paintXAxis(g, imp.getWidth(), totalHeight);
     }
 
     /**
@@ -682,7 +727,6 @@ public class ImageFormatter {
      */
     private void drawRotatedContent(Graphics2D g) {
         // For vertical orientation, we swap width and height
-        // and rotate the coordinate system accordingly
         boolean rightRotation = rightVerticalOrientation;
 
         // Draw main image (rotated)
@@ -690,10 +734,14 @@ public class ImageFormatter {
         int width = originalImage.getWidth();
         int height = originalImage.getHeight();
 
+        // Calculate column width and spacing
+        int columnWidth = height; // After rotation, height becomes the column width
+
+        // Draw the main image
         AffineTransform imgTransform = new AffineTransform();
         if (rightRotation) {
             // Rotation 90 degrees clockwise (right)
-            imgTransform.translate(horizontalMargin + height, verticalMargin);
+            imgTransform.translate(horizontalMargin + columnWidth, verticalMargin);
             imgTransform.rotate(Math.PI / 2);
         } else {
             // Rotation 90 degrees counter-clockwise (left)
@@ -707,59 +755,66 @@ public class ImageFormatter {
         transform = new AffineTransform();
         if (rightRotation) {
             // Right vertical: y-axis becomes horizontal, x-axis becomes vertical
-            transform.translate(horizontalMargin, verticalMargin + imp.getHeight());
-            transform.scale(imp.getHeight() / bounds.width, -imp.getWidth() / bounds.height);
+            transform.translate(horizontalMargin, verticalMargin + width);
+            transform.scale(columnWidth / bounds.width, -width / bounds.height);
         } else {
             // Left vertical: y-axis becomes horizontal, x-axis becomes vertical (flipped)
-            transform.translate(horizontalMargin + imp.getHeight(), verticalMargin);
-            transform.scale(-imp.getHeight() / bounds.width, -imp.getWidth() / bounds.height);
+            transform.translate(horizontalMargin + columnWidth, verticalMargin);
+            transform.scale(-columnWidth / bounds.width, -width / bounds.height);
         }
         transform.translate(-bounds.x, -bounds.y);
 
-        // Always draw axes on the bottom and left sides
+        // Draw main image axes
         if (showYAxis) {
-            // For both orientations, draw Y-axis as a horizontal axis at the bottom
-            paintHorizontalAxis(g, imp.getHeight(),
-                    verticalMargin + imp.getWidth(), // Position at the bottom of the rotated image
-                    horizontalMargin, horizontalMargin + imp.getHeight(),
+            // Draw Y-axis as a horizontal axis at the bottom
+            paintHorizontalAxis(g, columnWidth,
+                    verticalMargin + width, // Position at the bottom of the rotated image
+                    horizontalMargin, horizontalMargin + columnWidth,
                     yAxisLabel, yStepSize, bounds.y, bounds.height, yaxis_precision);
         }
 
         if (showXAxis) {
-            // For both orientations, draw X-axis as a vertical axis on the left
-            paintVerticalAxis(g, imp.getWidth(), horizontalMargin,
-                    verticalMargin, verticalMargin + imp.getWidth(),
+            // Draw X-axis as a vertical axis on the left
+            paintVerticalAxis(g, width, horizontalMargin,
+                    verticalMargin, verticalMargin + width,
                     xAxisLabel, xStepSize, bounds.x, bounds.width, xaxis_precision, false);
         }
 
-        // Draw channel stack if enabled
-        if (channelStack) {
-            for (int c=1; c<=imp.getNChannels(); c++) {
+        // Draw channel stack if enabled and there are multiple channels
+        if (channelStack && imp.getNChannels() > 1) {
+            // Make sure we have proper spacing between main image and first channel column
+            // Apply spacing between main image and first channel
+            int mainImageEndX = horizontalMargin + columnWidth;
+
+            for (int c = 1; c <= imp.getNChannels(); c++) {
                 imp.setC(c);
                 ImagePlus temp = new ImagePlus("temp image", imp.getChannelProcessor());
                 updateChannelColor(temp, c);
 
                 BufferedImage channelImage = temp.getBufferedImage();
 
+                // Calculate horizontal position for this channel's column
+                // First channel starts after main image + spacing
+                int columnPosition = mainImageEndX + channelStackspacing + (c-1)*(columnWidth + channelStackspacing);
+
                 AffineTransform channelTransform = new AffineTransform();
                 if (rightRotation) {
                     // Rotation 90 degrees clockwise (right)
-                    channelTransform.translate(horizontalMargin + height + c*(width + channelStackspacing), verticalMargin);
+                    channelTransform.translate(columnPosition + columnWidth, verticalMargin);
                     channelTransform.rotate(Math.PI / 2);
                 } else {
                     // Rotation 90 degrees counter-clockwise (left)
-                    channelTransform.translate(horizontalMargin, verticalMargin + width + c*(width + channelStackspacing));
+                    channelTransform.translate(columnPosition, verticalMargin + width);
                     channelTransform.rotate(-Math.PI / 2);
                 }
 
                 g.drawImage(channelImage, channelTransform, null);
 
-                // Draw Y-axis for each channel
+                // Draw Y-axis for each channel column
                 if (showYAxis) {
-                    // Draw Y-axis as a horizontal axis at the bottom of each channel
-                    paintHorizontalAxis(g, imp.getHeight(),
-                            verticalMargin + imp.getWidth() + c*imp.getWidth() + c*channelStackspacing,
-                            horizontalMargin, horizontalMargin + imp.getHeight(),
+                    paintHorizontalAxis(g, columnWidth,
+                            verticalMargin + width,
+                            columnPosition, columnPosition + columnWidth,
                             "", yStepSize, bounds.y, bounds.height, yaxis_precision);
                 }
             }
@@ -875,10 +930,7 @@ public class ImageFormatter {
         }
     }
 
-    /**
-     * Updated X axis painting method with customizable tick marks and colors
-     */
-    private void paintXAxis(Graphics g, int imgPixelWidth, int imgPixelHeight) {
+    private void paintXAxis(Graphics g, int imgPixelWidth, int axisYPosition) {
         Graphics2D g2d = (Graphics2D) g;
         g2d.setStroke(new BasicStroke(axisLineWidth));
 
@@ -890,8 +942,8 @@ public class ImageFormatter {
         g.setFont(font);
 
         // Draw main axis line
-        g2d.drawLine(horizontalMargin, verticalMargin + imgPixelHeight,
-                horizontalMargin + imgPixelWidth, verticalMargin + imgPixelHeight);
+        g2d.drawLine(horizontalMargin, axisYPosition,
+                horizontalMargin + imgPixelWidth, axisYPosition);
 
         // Draw tick marks and labels
         for (double x = bounds.x - (bounds.x % xStepSize); x < bounds.x + bounds.width; x += xStepSize) {
@@ -900,13 +952,13 @@ public class ImageFormatter {
 
             if (p.x >= horizontalMargin && p.x <= horizontalMargin + imgPixelWidth) {
                 g2d.setStroke(new BasicStroke(tickLineWidth));
-                g2d.drawLine((int)p.x, verticalMargin + imgPixelHeight,
-                        (int)p.x, verticalMargin + imgPixelHeight + tickLength);
+                g2d.drawLine((int)p.x, axisYPosition,
+                        (int)p.x, axisYPosition + tickLength);
 
                 String label = String.format("%." + xaxis_precision + "f", x);
                 g2d.drawString(label,
                         (int)p.x - g.getFontMetrics(font).stringWidth(label)/2,
-                        verticalMargin + imgPixelHeight + tickLength + g.getFontMetrics(font).getHeight());
+                        axisYPosition + tickLength + g.getFontMetrics(font).getHeight());
             }
         }
 
@@ -914,7 +966,7 @@ public class ImageFormatter {
         g.setFont(label_font);
         g2d.drawString(xAxisLabel,
                 horizontalMargin + imgPixelWidth / 2 - g.getFontMetrics().stringWidth(xAxisLabel) / 2,
-                verticalMargin + imgPixelHeight + tickLength + g.getFontMetrics(font).getHeight() + g.getFontMetrics(label_font).getHeight());
+                axisYPosition + tickLength + g.getFontMetrics(font).getHeight() + g.getFontMetrics(label_font).getHeight());
     }
 
     /**
