@@ -80,6 +80,9 @@ public class ImageFormatter {
     private BufferedImage image;
     private int horizontalMargin = 50;
     private int verticalMargin = 50;
+
+    private boolean rightVerticalOrientation = false;
+    private boolean leftVerticalOrientation = false;
     private boolean showXAxis = true;
     private String xAxisLabel = "";
 
@@ -435,6 +438,43 @@ public class ImageFormatter {
         );
     }
 
+    /**
+     * Sets the orientation to vertical with the image rotated 90 degrees to the right
+     * Kymographs/montages will be displayed vertically with time increasing downward
+     * This rotates both the image and axes to match
+     *
+     * @return This builder for method chaining
+     */
+    public ImageFormatter rightVerticalOrientation() {
+        this.rightVerticalOrientation = true;
+        this.leftVerticalOrientation = false;
+        return this;
+    }
+
+    /**
+     * Sets the orientation to vertical with the image rotated 90 degrees to the left
+     * Kymographs/montages will be displayed vertically with time increasing downward
+     * This rotates both the image and axes to match
+     *
+     * @return This builder for method chaining
+     */
+    public ImageFormatter leftVerticalOrientation() {
+        this.leftVerticalOrientation = true;
+        this.rightVerticalOrientation = false;
+        return this;
+    }
+
+    /**
+     * Resets the orientation to the default horizontal layout
+     *
+     * @return This builder for method chaining
+     */
+    public ImageFormatter horizontalOrientation() {
+        this.rightVerticalOrientation = false;
+        this.leftVerticalOrientation = false;
+        return this;
+    }
+
     public void build() {
         // If only showing a single channel, extract it before proceeding
         if (singleChannelToShow > 0) {
@@ -447,8 +487,21 @@ public class ImageFormatter {
         }
         imp = imp.resize(imp.getWidth()*rescaleFactor, imp.getHeight()*rescaleFactor, 1, "none");
 
-        int fullWidth = imp.getWidth() + horizontalMargin*2;
-        int fullHeight = (channelStack) ? (1 + imp.getNChannels())*imp.getHeight() + imp.getNChannels()*channelStackspacing + verticalMargin*2 : imp.getHeight() + verticalMargin*2;
+        // Calculate dimensions based on orientation
+        int fullWidth, fullHeight;
+        if (rightVerticalOrientation || leftVerticalOrientation) {
+            // Swap width and height for vertical orientation
+            fullWidth = imp.getHeight() + horizontalMargin*2;
+            fullHeight = (channelStack) ?
+                    (1 + imp.getNChannels())*imp.getWidth() + imp.getNChannels()*channelStackspacing + verticalMargin*2 :
+                    imp.getWidth() + verticalMargin*2;
+        } else {
+            // Standard horizontal orientation
+            fullWidth = imp.getWidth() + horizontalMargin*2;
+            fullHeight = (channelStack) ?
+                    (1 + imp.getNChannels())*imp.getHeight() + imp.getNChannels()*channelStackspacing + verticalMargin*2 :
+                    imp.getHeight() + verticalMargin*2;
+        }
 
         image = new BufferedImage(fullWidth, fullHeight, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g2d = image.createGraphics();
@@ -561,14 +614,42 @@ public class ImageFormatter {
         // Setup transformation and bounds
         bounds = new Rectangle2D.Double(xMinValue, yMinValue, xMaxValue - xMinValue, yMaxValue - yMinValue);
 
-        transform = new AffineTransform();
-        transform.translate(horizontalMargin, verticalMargin + imp.getHeight());
-        transform.scale(imp.getWidth() / bounds.width, -imp.getHeight() / bounds.height);
-        transform.translate(-bounds.x, -bounds.y);
+        // Set up the background
+        if (darkTheme) {
+            g.setColor(Color.BLACK);
+            g.fillRect(0, 0, image.getWidth(), image.getHeight());
+        }
 
         // Enable anti-aliasing for smoother lines and text
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+
+        if (rightVerticalOrientation || leftVerticalOrientation) {
+            // Draw rotated content
+            drawRotatedContent(g);
+        } else {
+            // Draw standard horizontal content
+            drawHorizontalContent(g);
+        }
+
+        // Draw title
+        g.setFont(title_font);
+        g.setColor(darkTheme ? DARK_THEME_AXIS_COLOR : Color.BLACK);
+        g.drawString(title,
+                image.getWidth() / 2 - g.getFontMetrics().stringWidth(title) / 2,
+                g.getFontMetrics(title_font).getHeight());
+    }
+
+    /**
+     * Draws content in standard horizontal orientation
+     *
+     * @param g The graphics context to draw to
+     */
+    private void drawHorizontalContent(Graphics2D g) {
+        transform = new AffineTransform();
+        transform.translate(horizontalMargin, verticalMargin + imp.getHeight());
+        transform.scale(imp.getWidth() / bounds.width, -imp.getHeight() / bounds.height);
+        transform.translate(-bounds.x, -bounds.y);
 
         // Draw main image
         g.drawImage(imp.getBufferedImage(), horizontalMargin, verticalMargin, null);
@@ -592,10 +673,206 @@ public class ImageFormatter {
                 if (showYAxis) paintYAxis(g, verticalMargin + c*imp.getHeight() + c*channelStackspacing, verticalMargin + (c + 1)*imp.getHeight() + c*channelStackspacing);
             }
         }
+    }
 
-        // Draw title
-        g.setFont(title_font);
-        g.drawString(title, horizontalMargin + imp.getWidth() / 2 - g.getFontMetrics().stringWidth(title) / 2, g.getFontMetrics(title_font).getHeight());
+    /**
+     * Draws content in rotated vertical orientation (either left or right)
+     *
+     * @param g The graphics context to draw to
+     */
+    private void drawRotatedContent(Graphics2D g) {
+        // For vertical orientation, we swap width and height
+        // and rotate the coordinate system accordingly
+        boolean rightRotation = rightVerticalOrientation;
+
+        // Draw main image (rotated)
+        BufferedImage originalImage = imp.getBufferedImage();
+        int width = originalImage.getWidth();
+        int height = originalImage.getHeight();
+
+        AffineTransform imgTransform = new AffineTransform();
+        if (rightRotation) {
+            // Rotation 90 degrees clockwise (right)
+            imgTransform.translate(horizontalMargin + height, verticalMargin);
+            imgTransform.rotate(Math.PI / 2);
+        } else {
+            // Rotation 90 degrees counter-clockwise (left)
+            imgTransform.translate(horizontalMargin, verticalMargin + width);
+            imgTransform.rotate(-Math.PI / 2);
+        }
+
+        g.drawImage(originalImage, imgTransform, null);
+
+        // Set up transform for axes
+        transform = new AffineTransform();
+        if (rightRotation) {
+            // Right vertical: y-axis becomes horizontal, x-axis becomes vertical
+            transform.translate(horizontalMargin, verticalMargin + imp.getHeight());
+            transform.scale(imp.getHeight() / bounds.width, -imp.getWidth() / bounds.height);
+        } else {
+            // Left vertical: y-axis becomes horizontal, x-axis becomes vertical (flipped)
+            transform.translate(horizontalMargin + imp.getHeight(), verticalMargin);
+            transform.scale(-imp.getHeight() / bounds.width, -imp.getWidth() / bounds.height);
+        }
+        transform.translate(-bounds.x, -bounds.y);
+
+        // Always draw axes on the bottom and left sides
+        if (showYAxis) {
+            // For both orientations, draw Y-axis as a horizontal axis at the bottom
+            paintHorizontalAxis(g, imp.getHeight(),
+                    verticalMargin + imp.getWidth(), // Position at the bottom of the rotated image
+                    horizontalMargin, horizontalMargin + imp.getHeight(),
+                    yAxisLabel, yStepSize, bounds.y, bounds.height, yaxis_precision);
+        }
+
+        if (showXAxis) {
+            // For both orientations, draw X-axis as a vertical axis on the left
+            paintVerticalAxis(g, imp.getWidth(), horizontalMargin,
+                    verticalMargin, verticalMargin + imp.getWidth(),
+                    xAxisLabel, xStepSize, bounds.x, bounds.width, xaxis_precision, false);
+        }
+
+        // Draw channel stack if enabled
+        if (channelStack) {
+            for (int c=1; c<=imp.getNChannels(); c++) {
+                imp.setC(c);
+                ImagePlus temp = new ImagePlus("temp image", imp.getChannelProcessor());
+                updateChannelColor(temp, c);
+
+                BufferedImage channelImage = temp.getBufferedImage();
+
+                AffineTransform channelTransform = new AffineTransform();
+                if (rightRotation) {
+                    // Rotation 90 degrees clockwise (right)
+                    channelTransform.translate(horizontalMargin + height + c*(width + channelStackspacing), verticalMargin);
+                    channelTransform.rotate(Math.PI / 2);
+                } else {
+                    // Rotation 90 degrees counter-clockwise (left)
+                    channelTransform.translate(horizontalMargin, verticalMargin + width + c*(width + channelStackspacing));
+                    channelTransform.rotate(-Math.PI / 2);
+                }
+
+                g.drawImage(channelImage, channelTransform, null);
+
+                // Draw Y-axis for each channel
+                if (showYAxis) {
+                    // Draw Y-axis as a horizontal axis at the bottom of each channel
+                    paintHorizontalAxis(g, imp.getHeight(),
+                            verticalMargin + imp.getWidth() + c*imp.getWidth() + c*channelStackspacing,
+                            horizontalMargin, horizontalMargin + imp.getHeight(),
+                            "", yStepSize, bounds.y, bounds.height, yaxis_precision);
+                }
+            }
+        }
+    }
+
+    /**
+     * Paints a horizontal axis (used for rotated layouts)
+     */
+    private void paintHorizontalAxis(Graphics g, int axisLength, int yPosition,
+                                     int xStart, int xEnd, String axisLabel, double stepSize,
+                                     double minValue, double valueRange, int precision) {
+
+        Graphics2D g2d = (Graphics2D) g;
+        g2d.setStroke(new BasicStroke(axisLineWidth));
+
+        // Use dark theme color or custom axis color
+        Color currentAxisColor = darkTheme ? DARK_THEME_AXIS_COLOR : axisColor;
+        g2d.setColor(currentAxisColor);
+
+        if (Double.isNaN(stepSize)) stepSize = getStepSize(valueRange, axisLength / 50);
+        g.setFont(font);
+
+        // Draw main axis line
+        g2d.drawLine(xStart, yPosition, xEnd, yPosition);
+
+        // Draw tick marks and labels
+        for (double value = minValue - (minValue % stepSize); value < minValue + valueRange; value += stepSize) {
+            int xPos = (int)(xStart + ((value - minValue) / valueRange) * axisLength);
+
+            if (xPos >= xStart && xPos <= xEnd) {
+                g2d.setStroke(new BasicStroke(tickLineWidth));
+                g2d.drawLine(xPos, yPosition, xPos, yPosition + tickLength);
+
+                String label = String.format("%." + precision + "f", value);
+                g2d.drawString(label,
+                        xPos - g.getFontMetrics(font).stringWidth(label)/2,
+                        yPosition + tickLength + g.getFontMetrics(font).getHeight());
+            }
+        }
+
+        // Draw axis label
+        if (axisLabel != null && !axisLabel.isEmpty()) {
+            g.setFont(label_font);
+            g2d.drawString(axisLabel,
+                    xStart + axisLength / 2 - g.getFontMetrics().stringWidth(axisLabel) / 2,
+                    yPosition + tickLength + g.getFontMetrics(font).getHeight() + g.getFontMetrics(label_font).getHeight());
+        }
+    }
+
+    /**
+     * Paints a vertical axis (used for rotated layouts)
+     */
+    private void paintVerticalAxis(Graphics g, int axisLength, int xPosition,
+                                   int yStart, int yEnd, String axisLabel, double stepSize,
+                                   double minValue, double valueRange, int precision, boolean rightSide) {
+
+        Graphics2D g2d = (Graphics2D) g;
+        g2d.setStroke(new BasicStroke(axisLineWidth));
+
+        // Use dark theme color or custom axis color
+        Color currentAxisColor = darkTheme ? DARK_THEME_AXIS_COLOR : axisColor;
+        g2d.setColor(currentAxisColor);
+
+        if (Double.isNaN(stepSize)) stepSize = getStepSize(valueRange, axisLength / 50);
+        g.setFont(font);
+
+        // Draw main axis line
+        g2d.drawLine(xPosition, yStart, xPosition, yEnd);
+
+        // Draw tick marks and labels
+        for (double value = minValue - (minValue % stepSize); value < minValue + valueRange; value += stepSize) {
+            int yPos = (int)(yStart + ((value - minValue) / valueRange) * axisLength);
+
+            if (yPos >= yStart && yPos <= yEnd) {
+                g2d.setStroke(new BasicStroke(tickLineWidth));
+
+                if (rightSide) {
+                    g2d.drawLine(xPosition, yPos, xPosition + tickLength, yPos);
+
+                    String label = String.format("%." + precision + "f", value);
+                    g2d.drawString(label,
+                            xPosition + tickLength + 2,
+                            yPos + g.getFontMetrics(font).getAscent()/2);
+                } else {
+                    g2d.drawLine(xPosition - tickLength, yPos, xPosition, yPos);
+
+                    String label = String.format("%." + precision + "f", value);
+                    g2d.drawString(label,
+                            xPosition - tickLength - g.getFontMetrics(font).stringWidth(label) - 2,
+                            yPos + g.getFontMetrics(font).getAscent()/2);
+                }
+            }
+        }
+
+        // Draw axis label with rotation
+        if (axisLabel != null && !axisLabel.isEmpty()) {
+            g.setFont(label_font);
+            AffineTransform at = g2d.getTransform();
+
+            if (rightSide) {
+                g2d.translate(xPosition + tickLength + g.getFontMetrics(font).getHeight() + 10,
+                        yStart + axisLength / 2);
+                g2d.rotate(Math.PI / 2);
+            } else {
+                g2d.translate(xPosition - tickLength - g.getFontMetrics(font).getHeight() - 10,
+                        yStart + axisLength / 2);
+                g2d.rotate(-Math.PI / 2);
+            }
+
+            g2d.drawString(axisLabel, -g.getFontMetrics().stringWidth(axisLabel) / 2, 0);
+            g2d.setTransform(at);
+        }
     }
 
     /**
@@ -732,5 +1009,34 @@ public class ImageFormatter {
             logService.error("Failed to save SVG: " + e.getMessage());
             e.printStackTrace();
         }
+    }
+
+    /**
+     * Saves the image as a PNG file.
+     *
+     * @param path The file path to save to (should end with .png)
+     * @return This builder for method chaining
+     */
+    public ImageFormatter saveAsPNG(String path) {
+        if (image == null) {
+            logService.error("No image to save. Call build() first.");
+            return this;
+        }
+
+        try {
+            File outputFile = new File(path);
+            // Ensure directory exists
+            outputFile.getParentFile().mkdirs();
+
+            // Save the image as PNG
+            ImageIO.write(image, "png", outputFile);
+
+            logService.info("PNG saved to: " + path);
+        } catch (Exception e) {
+            logService.error("Failed to save PNG: " + e.getMessage());
+            e.printStackTrace();
+        }
+
+        return this;
     }
 }

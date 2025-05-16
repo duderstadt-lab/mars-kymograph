@@ -89,6 +89,10 @@ public class ObjectShapeFormatter {
     private int canvasHeight = 150;
     private int horizontalMargin = 50;
     private int verticalMargin = 50;
+
+    // New orientation flags
+    private boolean rightVerticalOrientation = false;
+    private boolean leftVerticalOrientation = false;
     private int minT = -1;
     private int maxT = -1;
     private int frameStep = 1;
@@ -464,6 +468,43 @@ public class ObjectShapeFormatter {
     }
 
     /**
+     * Sets the orientation to vertical with the montage rotated 90 degrees to the right
+     * Shapes will be displayed in a vertical column with time increasing downward
+     * This rotates both the shapes and axes to match
+     *
+     * @return This builder for method chaining
+     */
+    public ObjectShapeFormatter rightVerticalOrientation() {
+        this.rightVerticalOrientation = true;
+        this.leftVerticalOrientation = false;
+        return this;
+    }
+
+    /**
+     * Sets the orientation to vertical with the montage rotated 90 degrees to the left
+     * Shapes will be displayed in a vertical column with time increasing downward
+     * This rotates both the shapes and axes to match
+     *
+     * @return This builder for method chaining
+     */
+    public ObjectShapeFormatter leftVerticalOrientation() {
+        this.leftVerticalOrientation = true;
+        this.rightVerticalOrientation = false;
+        return this;
+    }
+
+    /**
+     * Resets the orientation to the default horizontal layout
+     *
+     * @return This builder for method chaining
+     */
+    public ObjectShapeFormatter horizontalOrientation() {
+        this.rightVerticalOrientation = false;
+        this.leftVerticalOrientation = false;
+        return this;
+    }
+
+    /**
      * Build the montage of shapes
      *
      * @return This builder after creating the montage
@@ -501,10 +542,19 @@ public class ObjectShapeFormatter {
         }
         
         int frameCount = selectedTimePoints.size();
-        
-        // Calculate overall montage dimensions
-        int totalWidth = horizontalMargin * 2 + frameCount * canvasWidth + (frameCount - 1) * spacing;
-        int totalHeight = verticalMargin * 2 + canvasHeight;
+
+        // Calculate overall montage dimensions based on orientation
+        int totalWidth, totalHeight;
+
+        if (rightVerticalOrientation || leftVerticalOrientation) {
+            // For vertical orientation, swap width and height dimensions
+            totalWidth = horizontalMargin * 2 + canvasWidth;
+            totalHeight = verticalMargin * 2 + frameCount * canvasHeight + (frameCount - 1) * spacing;
+        } else {
+            // Standard horizontal orientation
+            totalWidth = horizontalMargin * 2 + frameCount * canvasWidth + (frameCount - 1) * spacing;
+            totalHeight = verticalMargin * 2 + canvasHeight;
+        }
         
         // Create the montage image
         image = new BufferedImage(totalWidth, totalHeight, BufferedImage.TYPE_INT_ARGB);
@@ -551,34 +601,92 @@ public class ObjectShapeFormatter {
                 }
             }
         }
-        
-        // Draw each shape in the sequence
-        for (int i = 0; i < selectedTimePoints.size(); i++) {
-            int t = selectedTimePoints.get(i);
-            int xPos = horizontalMargin + i * (canvasWidth + spacing);
-            int yPos = verticalMargin;
-            
-            // Draw a shape for this time point
-            drawShape(g2d, t, xPos, yPos, globalMinX, globalMaxX, globalMinY, globalMaxY);
-            
-            // Draw time label
-            if (showTimeLabels) {
-                g2d.setFont(font);
-                g2d.setColor(darkTheme ? DARK_THEME_COLOR : Color.BLACK);
-                String timeLabel = String.format("%." + xaxis_precision + "f", (double)t / timeUnitDivider);
-                int labelWidth = g2d.getFontMetrics().stringWidth(timeLabel);
-                g2d.drawString(timeLabel, xPos + (canvasWidth - labelWidth) / 2, 
-                        yPos + canvasHeight + g2d.getFontMetrics().getHeight() + 5);
+
+        // Draw shapes based on orientation
+        if (rightVerticalOrientation || leftVerticalOrientation) {
+            // Vertical layout (rotated)
+            for (int i = 0; i < selectedTimePoints.size(); i++) {
+                int t = selectedTimePoints.get(i);
+                int xPos = horizontalMargin;
+                int yPos = verticalMargin + i * (canvasHeight + spacing);
+
+                // Draw shape
+                drawShape(g2d, t, xPos, yPos, globalMinX, globalMaxX, globalMinY, globalMaxY);
+
+                // Draw time label
+                if (showTimeLabels) {
+                    g2d.setFont(font);
+                    g2d.setColor(darkTheme ? DARK_THEME_COLOR : Color.BLACK);
+                    String timeLabel = String.format("%." + xaxis_precision + "f", (double)t / timeUnitDivider);
+
+                    if (rightVerticalOrientation) {
+                        // Labels on the right side
+                        g2d.drawString(timeLabel,
+                                xPos + canvasWidth + 5,
+                                yPos + canvasHeight/2 + g2d.getFontMetrics().getAscent()/2);
+                    } else {
+                        // Labels on the left side
+                        int labelWidth = g2d.getFontMetrics().stringWidth(timeLabel);
+                        g2d.drawString(timeLabel,
+                                xPos - labelWidth - 5,
+                                yPos + canvasHeight/2 + g2d.getFontMetrics().getAscent()/2);
+                    }
+                }
             }
-        }
-        
-        // Draw x-axis label if provided
-        if (xAxisLabel != null && !xAxisLabel.isEmpty()) {
-            g2d.setFont(label_font);
-            g2d.setColor(darkTheme ? DARK_THEME_COLOR : Color.BLACK);
-            int labelWidth = g2d.getFontMetrics().stringWidth(xAxisLabel);
-            g2d.drawString(xAxisLabel, (totalWidth - labelWidth) / 2, 
-                    totalHeight - verticalMargin / 3);
+
+            // Draw x-axis label (now vertical)
+            if (xAxisLabel != null && !xAxisLabel.isEmpty()) {
+                g2d.setFont(label_font);
+                g2d.setColor(darkTheme ? DARK_THEME_COLOR : Color.BLACK);
+
+                // Save current transform
+                AffineTransform oldTransform = g2d.getTransform();
+
+                if (rightVerticalOrientation) {
+                    // Right side
+                    g2d.translate(totalWidth - horizontalMargin/2, totalHeight/2);
+                    g2d.rotate(Math.PI/2);
+                } else {
+                    // Left side
+                    g2d.translate(horizontalMargin/2, totalHeight/2);
+                    g2d.rotate(-Math.PI/2);
+                }
+
+                int labelWidth = g2d.getFontMetrics().stringWidth(xAxisLabel);
+                g2d.drawString(xAxisLabel, -labelWidth/2, g2d.getFontMetrics().getAscent()/2);
+
+                // Restore transform
+                g2d.setTransform(oldTransform);
+            }
+        } else {
+            // Standard horizontal layout
+            for (int i = 0; i < selectedTimePoints.size(); i++) {
+                int t = selectedTimePoints.get(i);
+                int xPos = horizontalMargin + i * (canvasWidth + spacing);
+                int yPos = verticalMargin;
+
+                // Draw shape
+                drawShape(g2d, t, xPos, yPos, globalMinX, globalMaxX, globalMinY, globalMaxY);
+
+                // Draw time label
+                if (showTimeLabels) {
+                    g2d.setFont(font);
+                    g2d.setColor(darkTheme ? DARK_THEME_COLOR : Color.BLACK);
+                    String timeLabel = String.format("%." + xaxis_precision + "f", (double)t / timeUnitDivider);
+                    int labelWidth = g2d.getFontMetrics().stringWidth(timeLabel);
+                    g2d.drawString(timeLabel, xPos + (canvasWidth - labelWidth) / 2,
+                            yPos + canvasHeight + g2d.getFontMetrics().getHeight() + 5);
+                }
+            }
+
+            // Draw x-axis label
+            if (xAxisLabel != null && !xAxisLabel.isEmpty()) {
+                g2d.setFont(label_font);
+                g2d.setColor(darkTheme ? DARK_THEME_COLOR : Color.BLACK);
+                int labelWidth = g2d.getFontMetrics().stringWidth(xAxisLabel);
+                g2d.drawString(xAxisLabel, (totalWidth - labelWidth) / 2,
+                        totalHeight - verticalMargin / 3);
+            }
         }
         
         g2d.dispose();
@@ -717,7 +825,7 @@ public class ObjectShapeFormatter {
         }
         return this;
     }
-    
+
     /**
      * Saves the montage as an SVG file
      *
@@ -730,42 +838,58 @@ public class ObjectShapeFormatter {
             DOMImplementation domImpl = GenericDOMImplementation.getDOMImplementation();
             String svgNS = "http://www.w3.org/2000/svg";
             Document document = domImpl.createDocument(svgNS, "svg", null);
-            
+
             // Create an SVG generator
             SVGGraphics2D svgGenerator = new SVGGraphics2D(document);
-            
-            // Set dimensions
-            svgGenerator.setSVGCanvasSize(new Dimension(image.getWidth(), image.getHeight()));
-            
-            // Rebuild the visualization directly to SVG
-            // We'll recalculate everything to ensure vector quality
-            svgGenerator.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            svgGenerator.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-            
-            // Set background
-            svgGenerator.setColor(darkTheme ? Color.BLACK : Color.WHITE);
-            svgGenerator.fillRect(0, 0, image.getWidth(), image.getHeight());
-            
+
             // Redraw everything
             // Get all available time points with shapes
             Set<Integer> allTimePoints = martianObject.getShapeKeys();
-            
+
             // Sort time points
             List<Integer> sortedTimePoints = new ArrayList<>(allTimePoints);
             Collections.sort(sortedTimePoints);
-            
+
             // Apply time point constraints
             int firstT = (minT != -1) ? minT : sortedTimePoints.get(0);
             int lastT = (maxT != -1) ? maxT : sortedTimePoints.get(sortedTimePoints.size() - 1);
-            
+
             // Filter time points based on constraints and step
             List<Integer> selectedTimePoints = sortedTimePoints.stream()
                     .filter(t -> t >= firstT && t <= lastT && (t - firstT) % frameStep == 0)
                     .collect(Collectors.toList());
-            
+
+            if (selectedTimePoints.isEmpty()) {
+                logService.error("No shapes found in the specified time range.");
+                return this;
+            }
+
             int frameCount = selectedTimePoints.size();
-            int totalWidth = horizontalMargin * 2 + frameCount * canvasWidth + (frameCount - 1) * spacing;
-            
+
+            // Calculate overall montage dimensions based on orientation
+            int totalWidth, totalHeight;
+
+            if (rightVerticalOrientation || leftVerticalOrientation) {
+                // For vertical orientation, swap width and height dimensions
+                totalWidth = horizontalMargin * 2 + canvasWidth;
+                totalHeight = verticalMargin * 2 + frameCount * canvasHeight + (frameCount - 1) * spacing;
+            } else {
+                // Standard horizontal orientation
+                totalWidth = horizontalMargin * 2 + frameCount * canvasWidth + (frameCount - 1) * spacing;
+                totalHeight = verticalMargin * 2 + canvasHeight;
+            }
+
+            // Set dimensions
+            svgGenerator.setSVGCanvasSize(new Dimension(totalWidth, totalHeight));
+
+            // Setup rendering hints
+            svgGenerator.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            svgGenerator.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+
+            // Set background
+            svgGenerator.setColor(darkTheme ? Color.BLACK : Color.WHITE);
+            svgGenerator.fillRect(0, 0, totalWidth, totalHeight);
+
             // Draw title if provided
             if (title != null && !title.isEmpty()) {
                 svgGenerator.setFont(title_font);
@@ -773,13 +897,13 @@ public class ObjectShapeFormatter {
                 int titleWidth = svgGenerator.getFontMetrics().stringWidth(title);
                 svgGenerator.drawString(title, (totalWidth - titleWidth) / 2, svgGenerator.getFontMetrics().getHeight());
             }
-            
+
             // Find global bounds for shape normalization (if enabled)
             double globalMinX = Double.POSITIVE_INFINITY;
             double globalMaxX = Double.NEGATIVE_INFINITY;
             double globalMinY = Double.POSITIVE_INFINITY;
             double globalMaxY = Double.NEGATIVE_INFINITY;
-            
+
             if (normalizeShapes) {
                 for (int t : selectedTimePoints) {
                     if (martianObject.hasShape(t)) {
@@ -795,41 +919,99 @@ public class ObjectShapeFormatter {
                     }
                 }
             }
-            
-            // Draw each shape in the sequence
-            for (int i = 0; i < selectedTimePoints.size(); i++) {
-                int t = selectedTimePoints.get(i);
-                int xPos = horizontalMargin + i * (canvasWidth + spacing);
-                int yPos = verticalMargin;
-                
-                // Draw a shape for this time point
-                drawShapeSVG(svgGenerator, t, xPos, yPos, globalMinX, globalMaxX, globalMinY, globalMaxY);
-                
-                // Draw time label
-                if (showTimeLabels) {
-                    svgGenerator.setFont(font);
+
+            // Draw shapes based on orientation
+            if (rightVerticalOrientation || leftVerticalOrientation) {
+                // Vertical layout (rotated)
+                for (int i = 0; i < selectedTimePoints.size(); i++) {
+                    int t = selectedTimePoints.get(i);
+                    int xPos = horizontalMargin;
+                    int yPos = verticalMargin + i * (canvasHeight + spacing);
+
+                    // Draw a shape for this time point
+                    drawShapeSVG(svgGenerator, t, xPos, yPos, globalMinX, globalMaxX, globalMinY, globalMaxY);
+
+                    // Draw time label
+                    if (showTimeLabels) {
+                        svgGenerator.setFont(font);
+                        svgGenerator.setColor(darkTheme ? DARK_THEME_COLOR : Color.BLACK);
+                        String timeLabel = String.format("%." + xaxis_precision + "f", (double)t / timeUnitDivider);
+
+                        if (rightVerticalOrientation) {
+                            // Labels on the right side
+                            svgGenerator.drawString(timeLabel,
+                                    xPos + canvasWidth + 5,
+                                    yPos + canvasHeight/2 + svgGenerator.getFontMetrics().getAscent()/2);
+                        } else {
+                            // Labels on the left side
+                            int labelWidth = svgGenerator.getFontMetrics().stringWidth(timeLabel);
+                            svgGenerator.drawString(timeLabel,
+                                    xPos - labelWidth - 5,
+                                    yPos + canvasHeight/2 + svgGenerator.getFontMetrics().getAscent()/2);
+                        }
+                    }
+                }
+
+                // Draw x-axis label (now vertical)
+                if (xAxisLabel != null && !xAxisLabel.isEmpty()) {
+                    svgGenerator.setFont(label_font);
                     svgGenerator.setColor(darkTheme ? DARK_THEME_COLOR : Color.BLACK);
-                    String timeLabel = String.format("%." + xaxis_precision + "f", (double)t / timeUnitDivider);
-                    int labelWidth = svgGenerator.getFontMetrics().stringWidth(timeLabel);
-                    svgGenerator.drawString(timeLabel, xPos + (canvasWidth - labelWidth) / 2, 
-                            yPos + canvasHeight + svgGenerator.getFontMetrics().getHeight() + 5);
+
+                    // Save current transform
+                    AffineTransform oldTransform = svgGenerator.getTransform();
+
+                    if (rightVerticalOrientation) {
+                        // Right side
+                        svgGenerator.translate(totalWidth - horizontalMargin/2, totalHeight/2);
+                        svgGenerator.rotate(Math.PI/2);
+                    } else {
+                        // Left side
+                        svgGenerator.translate(horizontalMargin/2, totalHeight/2);
+                        svgGenerator.rotate(-Math.PI/2);
+                    }
+
+                    int labelWidth = svgGenerator.getFontMetrics().stringWidth(xAxisLabel);
+                    svgGenerator.drawString(xAxisLabel, -labelWidth/2, svgGenerator.getFontMetrics().getAscent()/2);
+
+                    // Restore transform
+                    svgGenerator.setTransform(oldTransform);
+                }
+            } else {
+                // Standard horizontal layout
+                for (int i = 0; i < selectedTimePoints.size(); i++) {
+                    int t = selectedTimePoints.get(i);
+                    int xPos = horizontalMargin + i * (canvasWidth + spacing);
+                    int yPos = verticalMargin;
+
+                    // Draw a shape for this time point
+                    drawShapeSVG(svgGenerator, t, xPos, yPos, globalMinX, globalMaxX, globalMinY, globalMaxY);
+
+                    // Draw time label
+                    if (showTimeLabels) {
+                        svgGenerator.setFont(font);
+                        svgGenerator.setColor(darkTheme ? DARK_THEME_COLOR : Color.BLACK);
+                        String timeLabel = String.format("%." + xaxis_precision + "f", (double)t / timeUnitDivider);
+                        int labelWidth = svgGenerator.getFontMetrics().stringWidth(timeLabel);
+                        svgGenerator.drawString(timeLabel, xPos + (canvasWidth - labelWidth) / 2,
+                                yPos + canvasHeight + svgGenerator.getFontMetrics().getHeight() + 5);
+                    }
+                }
+
+                // Draw x-axis label
+                if (xAxisLabel != null && !xAxisLabel.isEmpty()) {
+                    svgGenerator.setFont(label_font);
+                    svgGenerator.setColor(darkTheme ? DARK_THEME_COLOR : Color.BLACK);
+                    int labelWidth = svgGenerator.getFontMetrics().stringWidth(xAxisLabel);
+                    svgGenerator.drawString(xAxisLabel, (totalWidth - labelWidth) / 2,
+                            totalHeight - verticalMargin / 3);
                 }
             }
-            
-            // Draw x-axis label if provided
-            if (xAxisLabel != null && !xAxisLabel.isEmpty()) {
-                svgGenerator.setFont(label_font);
-                svgGenerator.setColor(darkTheme ? DARK_THEME_COLOR : Color.BLACK);
-                int labelWidth = svgGenerator.getFontMetrics().stringWidth(xAxisLabel);
-                svgGenerator.drawString(xAxisLabel, (totalWidth - labelWidth) / 2, 
-                        image.getHeight() - verticalMargin / 3);
-            }
-            
+
             // Write to file
             try (Writer out = new OutputStreamWriter(new FileOutputStream(path), "UTF-8")) {
                 svgGenerator.stream(out, true); // true means use CSS style attributes
             }
-            
+
             logService.info("SVG saved to: " + path);
         } catch (Exception e) {
             logService.error("Failed to save SVG: " + e.getMessage());
