@@ -82,8 +82,8 @@
     	<!-- NB: Deploy releases to the SciJava Maven repository. -->
     	<releaseProfiles>sign,deploy-to-scijava</releaseProfiles>
 
-    	<mars-core.version>1.0.0-beta-57</mars-core.version>
-		<mars-minio.version>0.2</mars-minio.version>
+    	<mars-core.version>1.0.0</mars-core.version>
+		<mars-minio.version>0.5</mars-minio.version>
 	</properties>
 
 	<dependencies>
