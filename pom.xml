@@ -83,7 +83,7 @@
     	<releaseProfiles>sign,deploy-to-scijava</releaseProfiles>
 
     	<mars-core.version>1.0.0</mars-core.version>
-		<mars-minio.version>0.5</mars-minio.version>
+		<mars-minio.version>0.6</mars-minio.version>
 	</properties>
 
 	<dependencies>
