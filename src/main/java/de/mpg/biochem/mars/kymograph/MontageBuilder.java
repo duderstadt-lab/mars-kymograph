@@ -81,6 +81,7 @@ public class MontageBuilder {
     private ImageFilterMethod filterMethod = ImageFilterMethod.NONE;
     private double filterSize = 2;
     private boolean verticalReflection = false; // Whether to vertically flip the frames
+    private boolean horizontalReflection = false; // Whether to horizontally flip the frames
     private int numThreads = 1; // Number of threads for filtering operations
     private double interpolationFactor = 1.0; // Interpolation factor for increasing resolution
 
@@ -223,6 +224,17 @@ public class MontageBuilder {
      */
     public MontageBuilder setVerticalReflection(boolean reflect) {
         this.verticalReflection = reflect;
+        return this;
+    }
+
+    /**
+     * Enable or disable horizontal reflection (flipping) of the frames
+     *
+     * @param reflect True to horizontally reflect frames, false for normal orientation
+     * @return This builder for method chaining
+     */
+    public MontageBuilder setHorizontalReflection(boolean reflect) {
+        this.horizontalReflection = reflect;
         return this;
     }
 
@@ -451,7 +463,7 @@ public class MontageBuilder {
                                 // Process each frame in the group
                                 for (Integer t : group) {
                                     // Set source position
-                                    sourceRA.setPosition(x, sourceDataset.dimensionIndex(Axes.X));
+                                    sourceRA.setPosition(horizontalReflection ? (frameWidth - 1 - x) : x, sourceDataset.dimensionIndex(Axes.X));
                                     sourceRA.setPosition(verticalReflection ? (frameHeight - 1 - y) : y, sourceDataset.dimensionIndex(Axes.Y));
                                     sourceRA.setPosition(t, sourceDataset.dimensionIndex(Axes.TIME));
 
@@ -507,7 +519,7 @@ public class MontageBuilder {
                         for (int x = 0; x < frameWidth; x++) {
                             for (int c = 0; c < channels; c++) {
                                 // Set source position
-                                sourceRA.setPosition(x, sourceDataset.dimensionIndex(Axes.X));
+                                sourceRA.setPosition(horizontalReflection ? (frameWidth - 1 - x) : x, sourceDataset.dimensionIndex(Axes.X));
                                 sourceRA.setPosition(verticalReflection ? (frameHeight - 1 - y) : y, sourceDataset.dimensionIndex(Axes.Y));
                                 sourceRA.setPosition(t, sourceDataset.dimensionIndex(Axes.TIME));
 
