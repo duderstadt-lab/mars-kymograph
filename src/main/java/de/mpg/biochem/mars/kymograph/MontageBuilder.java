@@ -40,6 +40,11 @@ import org.scijava.log.LogService;
 import org.scijava.plugin.Parameter;
 
 import net.imagej.ImgPlus;
+import java.util.HashMap;
+import java.util.Map;
+import net.imglib2.img.Img;
+import net.imglib2.view.Views;
+import net.imglib2.RandomAccessibleInterval;
 
 import java.awt.*;
 import java.util.ArrayList;
@@ -80,6 +85,9 @@ public class MontageBuilder {
     private int reductionFactor = 1; // Used for skipping or grouping frames
     private ImageFilterMethod filterMethod = ImageFilterMethod.NONE;
     private double filterSize = 2;
+    private Map<Integer, ChannelFilterConfig> channelFilters = new HashMap<>(); // Channel-specific filters
+    private boolean useGlobalFilter = true; // Whether to apply global filter to all channels
+
     private boolean verticalReflection = false; // Whether to vertically flip the frames
     private boolean horizontalReflection = false; // Whether to horizontally flip the frames
     private int numThreads = 1; // Number of threads for filtering operations
@@ -251,6 +259,24 @@ public class MontageBuilder {
     }
 
     /**
+     * Set the filter method to median filter for a specific channel
+     *
+     * @param radius The radius of the median filter
+     * @param channel The channel number to apply the filter to (1-based: 1, 2, 3, etc.)
+     * @return This builder for method chaining
+     */
+    public MontageBuilder medianFilter(int radius, int channel) {
+        if (channel < 1) {
+            logService.warn("Channel number must be >= 1. Using channel 1 instead of " + channel);
+            channel = 1;
+        }
+        // Convert to 0-based index for internal storage
+        channelFilters.put(channel - 1, new ChannelFilterConfig(ImageFilterMethod.MEDIAN, radius));
+        useGlobalFilter = false; // Switch to channel-specific filtering
+        return this;
+    }
+
+    /**
      * Set the filter method to Gaussian filter
      *
      * @param sigma The sigma value for the Gaussian filter
@@ -263,6 +289,24 @@ public class MontageBuilder {
     }
 
     /**
+     * Set the filter method to Gaussian filter for a specific channel
+     *
+     * @param sigma The sigma value for the Gaussian filter
+     * @param channel The channel number to apply the filter to (1-based: 1, 2, 3, etc.)
+     * @return This builder for method chaining
+     */
+    public MontageBuilder gaussianFilter(double sigma, int channel) {
+        if (channel < 1) {
+            logService.warn("Channel number must be >= 1. Using channel 1 instead of " + channel);
+            channel = 1;
+        }
+        // Convert to 0-based index for internal storage
+        channelFilters.put(channel - 1, new ChannelFilterConfig(ImageFilterMethod.GAUSSIAN, sigma));
+        useGlobalFilter = false; // Switch to channel-specific filtering
+        return this;
+    }
+
+    /**
      * Set the filter method to top-hat filter
      *
      * @param radius The radius of the top-hat filter
@@ -271,6 +315,37 @@ public class MontageBuilder {
     public MontageBuilder tophatFilter(int radius) {
         this.filterMethod = ImageFilterMethod.TOPHAT;
         this.filterSize = radius;
+        return this;
+    }
+
+
+    /**
+     * Set the filter method to top-hat filter for a specific channel
+     *
+     * @param radius The radius of the top-hat filter
+     * @param channel The channel number to apply the filter to (1-based: 1, 2, 3, etc.)
+     * @return This builder for method chaining
+     */
+    public MontageBuilder tophatFilter(int radius, int channel) {
+        if (channel < 1) {
+            logService.warn("Channel number must be >= 1. Using channel 1 instead of " + channel);
+            channel = 1;
+        }
+        // Convert to 0-based index for internal storage
+        channelFilters.put(channel - 1, new ChannelFilterConfig(ImageFilterMethod.TOPHAT, radius));
+        useGlobalFilter = false; // Switch to channel-specific filtering
+        return this;
+    }
+
+
+    /**
+     * Clear all channel-specific filters and reset to global filtering mode
+     *
+     * @return This builder for method chaining
+     */
+    public MontageBuilder clearChannelFilters() {
+        channelFilters.clear();
+        useGlobalFilter = true;
         return this;
     }
 
@@ -326,7 +401,7 @@ public class MontageBuilder {
         ImgPlus<?> processedImgPlus = sourceImgPlus;
 
         // Apply filter if requested
-        if (filterMethod != ImageFilterMethod.NONE) {
+        if (shouldApplyFiltering()) {
             try {
                 // Use a helper method to apply the appropriate filter
                 processedImgPlus = applyFilterToImage(processedImgPlus);
@@ -552,6 +627,17 @@ public class MontageBuilder {
         return montage;
     }
 
+    /**
+     * Check if any filtering should be applied to the image.
+     * This includes both global filters and channel-specific filters.
+     *
+     * @return true if any filtering should be applied, false otherwise
+     */
+    private boolean shouldApplyFiltering() {
+        return (useGlobalFilter && filterMethod != ImageFilterMethod.NONE) ||
+                (!useGlobalFilter && !channelFilters.isEmpty());
+    }
+
     public Dataset getMontage() {
         return montage;
     }
@@ -559,6 +645,7 @@ public class MontageBuilder {
     /**
      * Helper method to apply the appropriate filter to the image.
      * Uses generic methods to properly handle type parameters.
+     * Supports both global filtering (all channels) and channel-specific filtering.
      *
      * @param image The image to filter
      * @return The filtered image
@@ -575,23 +662,271 @@ public class MontageBuilder {
         try {
             // This is a type-safe operation because we've checked the element type
             ImgPlus<T> typedImage = (ImgPlus<T>) image;
-
-            switch (filterMethod) {
-                case MEDIAN:
-                    return MarsKymographUtils.applyMedianFilter(
-                            typedImage, (int)filterSize, numThreads);
-                case GAUSSIAN:
-                    return MarsKymographUtils.applyGaussianFilter(
-                            typedImage, filterSize, numThreads);
-                case TOPHAT:
-                    return MarsKymographUtils.applyTopHatFilter(
-                            typedImage, (int)filterSize, numThreads);
-                default:
-                    return image; // No filtering needed
+            if (useGlobalFilter && filterMethod != ImageFilterMethod.NONE) {
+                // Apply global filter to all channels
+                switch (filterMethod) {
+                    case MEDIAN:
+                        return MarsKymographUtils.applyMedianFilter(
+                                typedImage, (int)filterSize, numThreads);
+                    case GAUSSIAN:
+                        return MarsKymographUtils.applyGaussianFilter(
+                                typedImage, filterSize, numThreads);
+                    case TOPHAT:
+                        return MarsKymographUtils.applyTopHatFilter(
+                                typedImage, (int)filterSize, numThreads);
+                    default:
+                        return image;
+                }
+            } else if (!useGlobalFilter && !channelFilters.isEmpty()) {
+                // Apply channel-specific filters
+                return applyChannelSpecificFilters(typedImage);
             }
+
+            return image; // No filtering needed
         } catch (Exception e) {
             logService.error("Failed to apply filter: " + e.getMessage());
             return image; // Return original if filtering fails
+        }
+    }
+
+    /**
+     * Helper method to apply channel-specific filters to the image.
+     * Creates a copy of the image and applies filters in-place to specific channels.
+     *
+     * @param image The image to filter
+     * @return The filtered image
+     */
+    @SuppressWarnings("unchecked")
+    private <T extends net.imglib2.type.numeric.RealType<T>> ImgPlus<T> applyChannelSpecificFilters(ImgPlus<T> image) {
+        try {
+            // Convert to dataset to get channel information
+            Dataset dataset = convertService.convert(image, Dataset.class);
+            int channelDim = dataset.dimensionIndex(Axes.CHANNEL);
+
+            if (channelDim == -1) {
+                // No channel dimension, treat as single channel (user would specify channel 1, which becomes index 0)
+                ChannelFilterConfig config = channelFilters.get(0); // Still use 0-based internally
+                if (config != null) {
+                    return applySingleChannelFilter(image, config);
+                }
+                return image;
+            }
+
+            int totalChannels = (int)dataset.dimension(channelDim);
+
+            // Create a copy of the image to work on
+            ImgPlus<T> result = image.copy();
+
+            // Apply filters to each specified channel
+            for (Map.Entry<Integer, ChannelFilterConfig> entry : channelFilters.entrySet()) {
+                int channelIndex = entry.getKey(); // This is already 0-based from our conversion above
+                ChannelFilterConfig config = entry.getValue();
+
+                // Validate channel index (0-based) against available channels
+                if (channelIndex >= 0 && channelIndex < totalChannels) {
+                    // Apply filter to this specific channel in-place
+                    applyFilterToChannel(result, channelIndex, channelDim, config);
+                } else {
+                    // Convert back to 1-based for user-friendly error message
+                    logService.warn("Channel " + (channelIndex + 1) + " is out of range. Total channels: " + totalChannels);
+                }
+            }
+
+            return result;
+        } catch (Exception e) {
+            logService.error("Failed to apply channel-specific filters: " + e.getMessage());
+            return image; // Return original if filtering fails
+        }
+    }
+
+    /**
+     * Apply a filter to a specific channel of a multi-channel image in-place.
+     *
+     * @param image The multi-channel image to modify
+     * @param channelIndex The index of the channel to filter
+     * @param channelDim The dimension index of the channel axis
+     * @param config The filter configuration
+     */
+    private <T extends net.imglib2.type.numeric.RealType<T>> void applyFilterToChannel(
+            ImgPlus<T> image, int channelIndex, int channelDim, ChannelFilterConfig config) {
+
+        switch (config.method) {
+            case MEDIAN:
+                applyMedianFilterToChannel(image, channelIndex, channelDim, (int)config.size);
+                break;
+            case GAUSSIAN:
+                applyGaussianFilterToChannel(image, channelIndex, channelDim, config.size);
+                break;
+            case TOPHAT:
+                applyTopHatFilterToChannel(image, channelIndex, channelDim, (int)config.size);
+                break;
+            default:
+                // No filter to apply
+                break;
+        }
+    }
+
+    /**
+     * Apply a Gaussian filter to a specific channel of a multi-channel image.
+     *
+     * @param image The multi-channel image
+     * @param channelIndex The channel to filter
+     * @param channelDim The dimension index of the channel axis
+     * @param sigma The sigma parameter for the Gaussian filter
+     */
+    private <T extends net.imglib2.type.numeric.RealType<T>> void applyGaussianFilterToChannel(
+            ImgPlus<T> image, int channelIndex, int channelDim, double sigma) {
+
+        try {
+            // Extract the specific channel as a view
+            RandomAccessibleInterval<T> channelView = Views.hyperSlice(image, channelDim, channelIndex);
+
+            // Create a temporary single-channel ImgPlus for filtering
+            ImgPlus<T> channelImgPlus = createSingleChannelImgPlus(channelView, image);
+
+            // Apply the filter
+            ImgPlus<T> filteredChannel = MarsKymographUtils.applyGaussianFilter(
+                    channelImgPlus, sigma, numThreads);
+
+            // Copy the filtered result back to the original channel
+            copyFilteredDataBack(filteredChannel, channelView);
+
+        } catch (Exception e) {
+            logService.error("Failed to apply Gaussian filter to channel " + channelIndex + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Apply a median filter to a specific channel of a multi-channel image.
+     *
+     * @param image The multi-channel image
+     * @param channelIndex The channel to filter
+     * @param channelDim The dimension index of the channel axis
+     * @param radius The radius parameter for the median filter
+     */
+    private <T extends net.imglib2.type.numeric.RealType<T>> void applyMedianFilterToChannel(
+            ImgPlus<T> image, int channelIndex, int channelDim, int radius) {
+
+        try {
+            // Extract the specific channel as a view
+            RandomAccessibleInterval<T> channelView = Views.hyperSlice(image, channelDim, channelIndex);
+
+            // Create a temporary single-channel ImgPlus for filtering
+            ImgPlus<T> channelImgPlus = createSingleChannelImgPlus(channelView, image);
+
+            // Apply the filter
+            ImgPlus<T> filteredChannel = MarsKymographUtils.applyMedianFilter(
+                    channelImgPlus, radius, numThreads);
+
+            // Copy the filtered result back to the original channel
+            copyFilteredDataBack(filteredChannel, channelView);
+
+        } catch (Exception e) {
+            logService.error("Failed to apply median filter to channel " + channelIndex + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Apply a top-hat filter to a specific channel of a multi-channel image.
+     *
+     * @param image The multi-channel image
+     * @param channelIndex The channel to filter
+     * @param channelDim The dimension index of the channel axis
+     * @param radius The radius parameter for the top-hat filter
+     */
+    private <T extends net.imglib2.type.numeric.RealType<T>> void applyTopHatFilterToChannel(
+            ImgPlus<T> image, int channelIndex, int channelDim, int radius) {
+
+        try {
+            // Extract the specific channel as a view
+            RandomAccessibleInterval<T> channelView = Views.hyperSlice(image, channelDim, channelIndex);
+
+            // Create a temporary single-channel ImgPlus for filtering
+            ImgPlus<T> channelImgPlus = createSingleChannelImgPlus(channelView, image);
+
+            // Apply the filter
+            ImgPlus<T> filteredChannel = MarsKymographUtils.applyTopHatFilter(
+                    channelImgPlus, radius, numThreads);
+
+            // Copy the filtered result back to the original channel
+            copyFilteredDataBack(filteredChannel, channelView);
+
+        } catch (Exception e) {
+            logService.error("Failed to apply top-hat filter to channel " + channelIndex + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Create a single-channel ImgPlus from a channel view for filter processing.
+     *
+     * @param channelView The channel view to wrap
+     * @param originalImage The original image for metadata
+     * @return A single-channel ImgPlus
+     */
+    private <T extends net.imglib2.type.numeric.RealType<T>> ImgPlus<T> createSingleChannelImgPlus(
+            RandomAccessibleInterval<T> channelView, ImgPlus<T> originalImage) {
+
+        // Create an Img from the view
+        Img<T> channelImg = originalImage.factory().create(channelView);
+
+        // Copy the data from the view to the new image
+        net.imglib2.Cursor<T> sourceCursor = Views.iterable(channelView).cursor();
+        net.imglib2.Cursor<T> targetCursor = channelImg.cursor();
+
+        while (sourceCursor.hasNext() && targetCursor.hasNext()) {
+            targetCursor.next().set(sourceCursor.next());
+        }
+
+        // Create ImgPlus with appropriate axes (excluding channel axis)
+        ImgPlus<T> result = new ImgPlus<>(channelImg);
+
+        // Copy relevant axes (excluding channel axis)
+        int axisIndex = 0;
+        for (int i = 0; i < originalImage.numDimensions(); i++) {
+            if (originalImage.axis(i).type() != Axes.CHANNEL) {
+                result.setAxis(originalImage.axis(i), axisIndex++);
+            }
+        }
+
+        return result;
+    }
+
+
+    /**
+     * Helper method to apply a filter to a single-channel image.
+     *
+     * @param image The image to filter
+     * @param config The filter configuration
+     * @return The filtered image
+     */
+    private <T extends net.imglib2.type.numeric.RealType<T>> ImgPlus<T> applySingleChannelFilter(
+            ImgPlus<T> image, ChannelFilterConfig config) {
+        switch (config.method) {
+            case MEDIAN:
+                return MarsKymographUtils.applyMedianFilter(image, (int)config.size, numThreads);
+            case GAUSSIAN:
+                return MarsKymographUtils.applyGaussianFilter(image, config.size, numThreads);
+            case TOPHAT:
+                return MarsKymographUtils.applyTopHatFilter(image, (int)config.size, numThreads);
+            default:
+                return image;
+        }
+    }
+
+    /**
+     * Copy filtered data back to the original channel view.
+     *
+     * @param filteredData The filtered single-channel image
+     * @param targetView The target channel view to copy to
+     */
+    private <T extends net.imglib2.type.numeric.RealType<T>> void copyFilteredDataBack(
+            ImgPlus<T> filteredData, RandomAccessibleInterval<T> targetView) {
+
+        net.imglib2.Cursor<T> sourceCursor = filteredData.cursor();
+        net.imglib2.Cursor<T> targetCursor = Views.iterable(targetView).cursor();
+
+        while (sourceCursor.hasNext() && targetCursor.hasNext()) {
+            targetCursor.next().set(sourceCursor.next());
         }
     }
 
@@ -620,6 +955,16 @@ public class MontageBuilder {
         } catch (Exception e) {
             logService.error("Failed to increase resolution: " + e.getMessage());
             return image; // Return original if interpolation fails
+        }
+    }
+
+    public static class ChannelFilterConfig {
+        public final ImageFilterMethod method;
+        public final double size;
+
+        public ChannelFilterConfig(ImageFilterMethod method, double size) {
+            this.method = method;
+            this.size = size;
         }
     }
 }
