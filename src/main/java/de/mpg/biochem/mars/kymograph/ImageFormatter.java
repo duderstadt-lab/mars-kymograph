@@ -563,11 +563,6 @@ public class ImageFormatter {
             return;
         }
 
-        // Save the current position
-        int currentC = imp.getC();
-        int currentZ = imp.getZ();
-        int currentT = imp.getT();
-
         // Set to the channel we want to extract
         imp.setC(singleChannelToShow);
 
@@ -636,6 +631,150 @@ public class ImageFormatter {
             IJ.run(img, "Magenta", "");
         else if (c == 3)
             IJ.run(img, "Green", "");
+    }
+
+    /**
+     * Gets the final display range minimum value for a specific channel after processing.
+     * This includes values set manually or determined by auto contrast enhancement.
+     *
+     * @param channel The channel number (1-based)
+     * @return The minimum display value for the channel, or Double.NaN if channel doesn't exist
+     */
+    public double getFinalDisplayRangeMin(int channel) {
+        if (channel < 1 || channel > imp.getNChannels()) {
+            logService.warn("Channel " + channel + " is out of range (1-" + imp.getNChannels() + ")");
+            return Double.NaN;
+        }
+
+        imp.setC(channel);
+        return imp.getDisplayRangeMin();
+    }
+
+    /**
+     * Gets the final display range maximum value for a specific channel after processing.
+     * This includes values set manually or determined by auto contrast enhancement.
+     *
+     * @param channel The channel number (1-based)
+     * @return The maximum display value for the channel, or Double.NaN if channel doesn't exist
+     */
+    public double getFinalDisplayRangeMax(int channel) {
+        if (channel < 1 || channel > imp.getNChannels()) {
+            logService.warn("Channel " + channel + " is out of range (1-" + imp.getNChannels() + ")");
+            return Double.NaN;
+        }
+
+        imp.setC(channel);
+        return imp.getDisplayRangeMax();
+    }
+
+    /**
+     * Gets the final display range (min and max) for a specific channel after processing.
+     * This includes values set manually or determined by auto contrast enhancement.
+     *
+     * @param channel The channel number (1-based)
+     * @return A double array [min, max], or null if channel doesn't exist
+     */
+    public double[] getFinalDisplayRange(int channel) {
+        if (channel < 1 || channel > imp.getNChannels()) {
+            logService.warn("Channel " + channel + " is out of range (1-" + imp.getNChannels() + ")");
+            return null;
+        }
+
+        imp.setC(channel);
+        return new double[]{imp.getDisplayRangeMin(), imp.getDisplayRangeMax()};
+    }
+
+    /**
+     * Gets the final display ranges for all channels after processing.
+     * This includes values set manually or determined by auto contrast enhancement.
+     *
+     * @return A Map where keys are channel numbers (1-based) and values are double arrays [min, max]
+     */
+    public Map<Integer, double[]> getAllFinalDisplayRanges() {
+        Map<Integer, double[]> ranges = new HashMap<>();
+
+        // Save current channel position
+        int currentChannel = imp.getC();
+
+        try {
+            for (int c = 1; c <= imp.getNChannels(); c++) {
+                imp.setC(c);
+                ranges.put(c, new double[]{imp.getDisplayRangeMin(), imp.getDisplayRangeMax()});
+            }
+        } finally {
+            // Restore original channel position
+            imp.setC(currentChannel);
+        }
+
+        return ranges;
+    }
+
+    /**
+     * Gets the final display range minimums for all channels after processing.
+     *
+     * @return A Map where keys are channel numbers (1-based) and values are minimum display values
+     */
+    public Map<Integer, Double> getAllFinalDisplayRangeMins() {
+        Map<Integer, Double> mins = new HashMap<>();
+
+        // Save current channel position
+        int currentChannel = imp.getC();
+
+        try {
+            for (int c = 1; c <= imp.getNChannels(); c++) {
+                imp.setC(c);
+                mins.put(c, imp.getDisplayRangeMin());
+            }
+        } finally {
+            // Restore original channel position
+            imp.setC(currentChannel);
+        }
+
+        return mins;
+    }
+
+    /**
+     * Gets the final display range maximums for all channels after processing.
+     *
+     * @return A Map where keys are channel numbers (1-based) and values are maximum display values
+     */
+    public Map<Integer, Double> getAllFinalDisplayRangeMaxs() {
+        Map<Integer, Double> maxs = new HashMap<>();
+
+        // Save current channel position
+        int currentChannel = imp.getC();
+
+        try {
+            for (int c = 1; c <= imp.getNChannels(); c++) {
+                imp.setC(c);
+                maxs.put(c, imp.getDisplayRangeMax());
+            }
+        } finally {
+            // Restore original channel position
+            imp.setC(currentChannel);
+        }
+
+        return maxs;
+    }
+
+    /**
+     * Prints the final display ranges for all channels to the log.
+     * Useful for debugging and understanding the auto contrast results.
+     */
+    public void logFinalDisplayRanges() {
+        Map<Integer, double[]> ranges = getAllFinalDisplayRanges();
+
+        logService.info("Final display ranges after processing:");
+        for (Map.Entry<Integer, double[]> entry : ranges.entrySet()) {
+            int channel = entry.getKey();
+            double[] range = entry.getValue();
+
+            String source = displayRangeCtoMin.containsKey(channel) || displayRangeCtoMax.containsKey(channel)
+                    ? "manually set" : "auto contrast";
+
+            logService.info(String.format("Channel %d: [%.2f, %.2f] (%s)",
+                    channel, range[0], range[1], source));
+        }
     }
 
     /**
