@@ -74,6 +74,9 @@
 	</ciManagement>
 
 	<properties>
+		<scijava.jvm.build.version>21</scijava.jvm.build.version>
+		<scijava.jvm.version>21</scijava.jvm.version>
+
 		<package-name>de.mpg.biochem.mars.fx</package-name>
     	<license.copyrightOwners>Karl Duderstadt</license.copyrightOwners>
     	<license.licenseName>bsd_2</license.licenseName>
@@ -82,9 +85,13 @@
     	<!-- NB: Deploy releases to the SciJava Maven repository. -->
     	<releaseProfiles>sign,deploy-to-scijava</releaseProfiles>
 
+		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+		<maven.compiler.source>21</maven.compiler.source>
+		<maven.compiler.target>21</maven.compiler.target>
+
     	<mars-core.version>1.0.0</mars-core.version>
 		<mars-minio.version>0.6</mars-minio.version>
-		<mars-transverseflow.version>0.2.0</mars-transverseflow.version>
+		<mars-transverseflow.version>0.3.0</mars-transverseflow.version>
 	</properties>
 
 	<dependencies>
