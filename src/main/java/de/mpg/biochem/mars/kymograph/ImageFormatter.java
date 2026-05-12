@@ -555,7 +555,7 @@ public class ImageFormatter {
                 if (displayRangeCtoMin.containsKey(originalChannelIndex) || displayRangeCtoMax.containsKey(originalChannelIndex)) {
                     double min = displayRangeCtoMin.getOrDefault(originalChannelIndex, newImp.getDisplayRangeMin());
                     double max = displayRangeCtoMax.getOrDefault(originalChannelIndex, newImp.getDisplayRangeMax());
-                    newImp.setDisplayRange(min, max, newChannelIndex);
+                    newImp.setDisplayRange(min, max);
                 } else {
                     // Apply auto contrast if no manual range was set
                     IJ.run(newImp, "Enhance Contrast", "saturated=0.35");
