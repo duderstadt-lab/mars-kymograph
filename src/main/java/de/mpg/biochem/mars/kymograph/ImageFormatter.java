@@ -31,6 +31,7 @@ package de.mpg.biochem.mars.kymograph;
 
 import net.imagej.Dataset;
 
+import ij.CompositeImage;
 import ij.ImagePlus;
 import ij.IJ;
 import ij.ImageStack;
@@ -421,6 +422,7 @@ public class ImageFormatter {
         if (multipleChannelsToShow == null && singleChannelToShow == -1) {
             multipleChannelsToShow = new int[imp.getNChannels()];
             for (int c=1; c<=imp.getNChannels(); c++) multipleChannelsToShow[c - 1] = c;
+            mergedImage = extractChannelsToNewImage(multipleChannelsToShow);
         }
         mergedImage = mergedImage.resize(mergedImage.getWidth()*rescaleFactor, mergedImage.getHeight()*rescaleFactor, 1, "none");
         imp = imp.resize(imp.getWidth()*rescaleFactor, imp.getHeight()*rescaleFactor, 1, "none");
@@ -767,7 +769,10 @@ public class ImageFormatter {
         transform.translate(-bounds.x, -bounds.y);
 
         // Draw main image
-        g.drawImage(mergedImage.getBufferedImage(), horizontalMargin, verticalMargin, null);
+        if (mergedImage.getNChannels() > 1)
+            g.drawImage(generateCompositeImage(mergedImage), horizontalMargin, verticalMargin, null);
+        else
+            g.drawImage(mergedImage.getBufferedImage(), horizontalMargin, verticalMargin, null);
 
         // Draw y-axis if enabled
         if (showYAxis) paintYAxis(g, verticalMargin, verticalMargin + imp.getHeight());
@@ -814,7 +819,8 @@ public class ImageFormatter {
         boolean rightRotation = rightVerticalOrientation;
 
         // Draw main image (rotated)
-        BufferedImage originalImage = mergedImage.getBufferedImage();
+        BufferedImage originalImage = mergedImage.getNChannels() > 1
+                ? generateCompositeImage(mergedImage) : mergedImage.getBufferedImage();
         int width = originalImage.getWidth();
         int height = originalImage.getHeight();
 
@@ -904,6 +910,21 @@ public class ImageFormatter {
                 stackIndex++; // Increment for next channel position
             }
         }
+    }
+
+    /**
+     * Generate a composite image from a multi-channel image
+     */
+    private BufferedImage generateCompositeImage(ImagePlus mergedImage) {
+        CompositeImage ci = new CompositeImage(imp, CompositeImage.COMPOSITE);
+        for (int originalChannelIndex : multipleChannelsToShow) {
+            // Apply contrast and LUT settings
+            ci.setC(originalChannelIndex);
+            updateChannelColor(ci, originalChannelIndex);
+        }
+        // render to RGB image
+        ImagePlus rgbImage = ci.flatten();
+        return rgbImage.getBufferedImage();
     }
 
     /**
@@ -1111,9 +1132,7 @@ public class ImageFormatter {
             return magnitude * 2.0;
     }
 
-    public String getHtmlEncodedImage() {
-        return this.htmlEncodedImage;
-    }
+    public String getHtmlEncodedImage() { return this.htmlEncodedImage; }
 
     /**
      * Saves the image as an SVG file using Apache Batik.
