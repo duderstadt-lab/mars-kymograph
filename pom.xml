@@ -5,7 +5,7 @@
 	<parent>
 		<groupId>org.scijava</groupId>
 		<artifactId>pom-scijava</artifactId>
-		<version>40.0.0</version>
+		<version>44.0.0</version>
 		<relativePath />
 	</parent>
 
@@ -181,10 +181,6 @@
 		<dependency>
 			<groupId>org.apache.xmlgraphics</groupId>
 			<artifactId>batik-svggen</artifactId>
-		</dependency>
-		<dependency>
-			<groupId>org.apache.xmlgraphics</groupId>
-			<artifactId>batik-dom</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.xmlgraphics</groupId>
