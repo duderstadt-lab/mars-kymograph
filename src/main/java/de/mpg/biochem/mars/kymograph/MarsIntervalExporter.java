@@ -29,9 +29,7 @@
 
 package de.mpg.biochem.mars.kymograph;
 
-import de.mpg.biochem.mars.n5.MarsN5Source;
-import de.mpg.biochem.mars.n5.MarsN5ViewerReaderFun;
-import de.mpg.biochem.mars.n5.MarsSingleTimePointN5Source;
+import de.mpg.biochem.mars.n5.MarsN5SourceLoader;
 import de.mpg.biochem.mars.metadata.MarsBdvSource;
 import de.mpg.biochem.mars.metadata.MarsMetadata;
 import de.mpg.biochem.mars.molecule.*;
@@ -54,9 +52,7 @@ import net.imglib2.type.Type;
 import net.imglib2.type.numeric.NumericType;
 import net.imglib2.util.Util;
 import net.imglib2.view.Views;
-import org.janelia.saalfeldlab.n5.N5Reader;
 import org.janelia.saalfeldlab.n5.ij.N5Importer;
-import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
 import org.scijava.Context;
 import org.scijava.log.LogService;
 import org.scijava.plugin.Parameter;
@@ -82,8 +78,9 @@ public class MarsIntervalExporter<T extends NumericType<T> & NativeType<T>> {
 
     private Molecule molecule;
     private static Map<String, List<Source>> sourcesForExport;
-    private static Map<String, Map<String, long[]>> sourceDimensions;
-    private static Map<String, N5Reader> n5Readers;
+    // Shared across instances so repeated exports within a session reuse open
+    // N5 readers instead of reopening them per molecule/kymograph.
+    private static final MarsN5SourceLoader SOURCE_LOADER = new MarsN5SourceLoader();
     private int minT, maxT;
     private Interval interval;
 
@@ -93,8 +90,6 @@ public class MarsIntervalExporter<T extends NumericType<T> & NativeType<T>> {
         this.archive = archive;
 
         if (sourcesForExport == null) sourcesForExport = new HashMap<String, List<Source>>();
-        if (sourceDimensions == null) sourceDimensions = new HashMap<String, Map<String, long[]>>();
-        if (n5Readers == null) n5Readers = new HashMap<String, N5Reader>();
     }
 
     public MarsIntervalExporter setMolecule(Molecule molecule) {
@@ -133,7 +128,7 @@ public class MarsIntervalExporter<T extends NumericType<T> & NativeType<T>> {
 
                 for (MarsBdvSource marsSource : marsMetadata.getBdvSources()) {
                     if (marsSource.isN5()) {
-                        exportSources.add(loadN5Source(marsSource, marsMetadata));
+                        exportSources.add(SOURCE_LOADER.loadN5Source(marsSource, marsMetadata));
                     }
                 }
 
@@ -143,83 +138,6 @@ public class MarsIntervalExporter<T extends NumericType<T> & NativeType<T>> {
                 e.printStackTrace();
             }
         }
-    }
-
-    private Source<T> loadN5Source(MarsBdvSource source, MarsMetadata meta)
-            throws IOException
-    {
-        N5Reader reader;
-        if (n5Readers.containsKey(source.getPath())) {
-            reader = n5Readers.get(source.getPath());
-        }
-        else {
-            reader = new MarsN5ViewerReaderFun().apply(source.getPath());
-            n5Readers.put(source.getPath(), reader);
-        }
-
-        @SuppressWarnings("rawtypes")
-        final RandomAccessibleInterval wholeImage = N5Utils.open(reader, source
-                .getN5Dataset());
-
-        // wholeImage should be XYT or XYCT. If XYCT, we hyperSlice to get one
-        // channel.
-        // XYZCT should also be supported
-        int dims = wholeImage.numDimensions();
-        long[] dimensions = new long[dims];
-        wholeImage.dimensions(dimensions);
-
-        if (!sourceDimensions.containsKey(meta.getUID())) {
-            Map<String, long[]> dimensionsMap = new HashMap<String, long[]>();
-            sourceDimensions.put(meta.getUID(), dimensionsMap);
-        }
-        sourceDimensions.get(meta.getUID()).put(source.getName(), dimensions);
-
-        @SuppressWarnings("rawtypes")
-        final RandomAccessibleInterval image = (dims > 3) ? Views.hyperSlice(
-                wholeImage, wholeImage.numDimensions() - 2, source.getChannel())
-                : wholeImage;
-
-        int tSize = (int) image.dimension(image.numDimensions() - 1);
-
-        @SuppressWarnings("rawtypes")
-        final RandomAccessibleInterval[] images = new RandomAccessibleInterval[1];
-        images[0] = image;
-
-        if (source.getSingleTimePointMode()) {
-            AffineTransform3D[] transforms = new AffineTransform3D[tSize];
-
-            // We don't drift correct single time point overlays
-            // Drift should be corrected against them
-            for (int t = 0; t < tSize; t++)
-                transforms[t] = source.getAffineTransform3D();
-
-            int singleTimePoint = source.getSingleTimePoint();
-            @SuppressWarnings("unchecked")
-            final MarsSingleTimePointN5Source<T> n5Source =
-                    new MarsSingleTimePointN5Source<>((T) Util.getTypeFromInterval(image),
-                            source.getName(), images, transforms, singleTimePoint);
-
-            return n5Source;
-        }
-        else {
-            AffineTransform3D[] transforms = new AffineTransform3D[tSize];
-
-            for (int t = 0; t < tSize; t++) {
-                if (source.getCorrectDrift()) {
-                    double dX = meta.getPlane(0, 0, 0, t).getXDrift();
-                    double dY = meta.getPlane(0, 0, 0, t).getYDrift();
-                    transforms[t] = source.getAffineTransform3D(dX, dY);
-                }
-                else transforms[t] = source.getAffineTransform3D();
-            }
-
-            @SuppressWarnings("unchecked")
-            final MarsN5Source<T> n5Source = new MarsN5Source<>((T) Util
-                    .getTypeFromInterval(image), source.getName(), images, transforms);
-
-            return n5Source;
-        }
-
     }
 
     public ImgPlus<T> build() {
