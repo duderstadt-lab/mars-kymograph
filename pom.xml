@@ -91,7 +91,7 @@
 
     	<mars-core.version>1.0.4</mars-core.version>
 		<mars-minio.version>0.13</mars-minio.version>
-		<mars-transverseflow.version>0.3.0</mars-transverseflow.version>
+		<mars-transverseflow.version>0.3.1</mars-transverseflow.version>
 	</properties>
 
 	<dependencies>
