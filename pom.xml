@@ -89,8 +89,8 @@
 		<maven.compiler.source>21</maven.compiler.source>
 		<maven.compiler.target>21</maven.compiler.target>
 
-    	<mars-core.version>1.0.4</mars-core.version>
-		<mars-minio.version>0.13</mars-minio.version>
+    	<mars-core.version>1.0.5</mars-core.version>
+		<mars-minio.version>0.14</mars-minio.version>
 		<mars-transverseflow.version>0.3.2</mars-transverseflow.version>
 	</properties>
 
