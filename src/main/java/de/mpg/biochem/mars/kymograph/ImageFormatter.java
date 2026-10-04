@@ -508,8 +508,11 @@ public class ImageFormatter {
         }
 
         if (imp.getNChannels() == 1) {
-            // Already a single channel image, return a duplicate
-            return imp.duplicate();
+            // Already a single channel image: apply the channel 1 display
+            // range and LUT to a duplicate
+            ImagePlus single = imp.duplicate();
+            updateChannelColor(single, 1);
+            return single;
         }
 
         // Save the current position of the original image
@@ -576,9 +579,15 @@ public class ImageFormatter {
     }
 
     private void updateChannelColor(ImagePlus img, int c) {
-        if (displayRangeCtoMin.containsKey(c) || displayRangeCtoMax.containsKey(c))
-            img.setDisplayRange(displayRangeCtoMin.containsKey(c) ? displayRangeCtoMin.get(c) : img.getDisplayRangeMin(),
-                    displayRangeCtoMax.containsKey(c) ? displayRangeCtoMax.get(c) : img.getDisplayRangeMax());
+        boolean hasMin = displayRangeCtoMin.containsKey(c);
+        boolean hasMax = displayRangeCtoMax.containsKey(c);
+        if (hasMin || hasMax) {
+            // The ImagePlus wrapping the Dataset starts with a 0-1 display
+            // range, so take a missing bound from the data instead.
+            if (!(hasMin && hasMax)) img.resetDisplayRange();
+            img.setDisplayRange(hasMin ? displayRangeCtoMin.get(c) : img.getDisplayRangeMin(),
+                    hasMax ? displayRangeCtoMax.get(c) : img.getDisplayRangeMax());
+        }
         else IJ.run(img, "Enhance Contrast", "saturated=0.35");
         if (cToLUTName.containsKey(c))
             IJ.run(img, cToLUTName.get(c), "");
