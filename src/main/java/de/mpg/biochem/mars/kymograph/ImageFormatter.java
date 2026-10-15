@@ -86,6 +86,14 @@ public class ImageFormatter {
     private boolean rightVerticalOrientation = false;
     private boolean leftVerticalOrientation = false;
     private boolean showXAxis = true;
+    private boolean showVerticalScaleBar = false;
+    private boolean showHorizontalScaleBar = false;
+    private double verticalLengthPerPixel = 1;
+    private double horizontalLengthPerPixel = 1;
+    private double verticalScaleBarLength = 10;
+    private double horizontalScaleBarLength = 10;
+    private String verticalScaleBarLabel = null;
+    private String horizontalScaleBarLabel = null;
     private String xAxisLabel = "";
 
     private Rectangle2D.Double bounds;
@@ -119,6 +127,8 @@ public class ImageFormatter {
     private int tickLength = 5;
     private float tickLineWidth = 2.0f;
     private Color axisColor = Color.BLACK;
+
+    private Color scaleBarColor = new Color(0xe0e0e0);
 
     private boolean darkTheme = false;
 
@@ -315,6 +325,35 @@ public class ImageFormatter {
 
     public ImageFormatter setDarkTheme(boolean darkTheme) {
         this.darkTheme = darkTheme;
+        return this;
+    }
+
+    public ImageFormatter setVerticalScaleBar(double scaleBarLength, double lengthPerPixel) {
+        this.showVerticalScaleBar = true;
+        this.verticalScaleBarLength = scaleBarLength;
+        this.verticalLengthPerPixel = lengthPerPixel;
+        return this;
+    }
+
+    public ImageFormatter setHorizontalScaleBar(double scaleBarLength, double lengthPerPixel) {
+        this.showHorizontalScaleBar = true;
+        this.horizontalScaleBarLength = scaleBarLength;
+        this.horizontalLengthPerPixel = lengthPerPixel;
+        return this;
+    }
+
+    public ImageFormatter setVerticalScaleBarLabel(String barLabel) {
+        this.verticalScaleBarLabel = barLabel;
+        return this;
+    }
+
+    public ImageFormatter setHorizontalScaleBarLabel(String barLabel) {
+        this.horizontalScaleBarLabel = barLabel;
+        return this;
+    }
+
+    public ImageFormatter setScaleBarColor(int rgb) {
+        this.scaleBarColor = new Color(rgb);
         return this;
     }
 
@@ -786,6 +825,21 @@ public class ImageFormatter {
         // Draw y-axis if enabled
         if (showYAxis) paintYAxis(g, verticalMargin, verticalMargin + imp.getHeight());
 
+        // Draw a vertical scalebar if enabled
+        if (showVerticalScaleBar) {
+            double scaleBarPixelLength = rescaleFactor * verticalScaleBarLength / verticalLengthPerPixel;
+            String barLabel = verticalScaleBarLabel == null ? String.valueOf(verticalScaleBarLength) : verticalScaleBarLabel;
+            int yEnd = verticalMargin + imp.getHeight();
+            int yStart = yEnd - (int) scaleBarPixelLength;
+            paintVerticalScaleBar(g, horizontalMargin, yStart, yEnd, barLabel);
+        }
+        if (showHorizontalScaleBar) {
+            double scaleBarPixelLength = rescaleFactor * horizontalScaleBarLength / horizontalLengthPerPixel;
+            String barLabel = horizontalScaleBarLabel == null ? String.valueOf(horizontalScaleBarLength) : horizontalScaleBarLabel;
+            int yPosition = verticalMargin + imp.getHeight();
+            paintHorizontalScaleBar(g, yPosition, horizontalMargin, horizontalMargin + (int) scaleBarPixelLength, barLabel);
+        }
+
         // Track the total height - start with the main image
         int totalHeight = verticalMargin + imp.getHeight();
 
@@ -877,6 +931,21 @@ public class ImageFormatter {
             paintVerticalAxis(g, width, horizontalMargin,
                     verticalMargin, verticalMargin + width,
                     xAxisLabel, xStepSize, bounds.x, bounds.width, xaxis_precision, false);
+        }
+
+        // Draw a vertical scalebar if enabled
+        if (showVerticalScaleBar) {
+            double scaleBarPixelLength = rescaleFactor * verticalScaleBarLength / verticalLengthPerPixel;
+            String barLabel = verticalScaleBarLabel == null ? String.valueOf(verticalScaleBarLength) : verticalScaleBarLabel;
+            int yEnd = verticalMargin + imp.getHeight();
+            int yStart = yEnd - (int) scaleBarPixelLength;
+            paintVerticalScaleBar(g, horizontalMargin, yStart, yEnd, barLabel);
+        }
+        if (showHorizontalScaleBar) {
+            double scaleBarPixelLength = rescaleFactor * horizontalScaleBarLength / horizontalLengthPerPixel;
+            String barLabel = horizontalScaleBarLabel == null ? String.valueOf(horizontalScaleBarLength) : horizontalScaleBarLabel;
+            int yPosition = verticalMargin + imp.getHeight();
+            paintHorizontalScaleBar(g, yPosition, horizontalMargin, horizontalMargin + (int) scaleBarPixelLength, barLabel);
         }
 
         // Draw channel stack if enabled and there are multiple channels
@@ -1126,6 +1195,42 @@ public class ImageFormatter {
         g2d.rotate(-Math.PI / 2);
         g2d.drawString(yAxisLabel, 0, 0);
         g2d.setTransform(at);
+    }
+
+    /**
+     * Paints a vertical axis (used for rotated layouts)
+     */
+    private void paintVerticalScaleBar(Graphics g, int xPosition, int yStart, int yEnd, String barLabel) {
+        Graphics2D g2d = (Graphics2D) g;
+        g2d.setStroke(new BasicStroke(axisLineWidth));
+
+        // Use dark theme color or custom axis color
+        g2d.setColor(scaleBarColor);
+
+        // Draw main axis line
+        g2d.drawLine(xPosition, yStart, xPosition, yEnd);
+
+        // Draw label
+        AffineTransform originalAT = g2d.getTransform();
+        g2d.translate(xPosition - tickLength - 2,
+                (yStart + yEnd) / 2 + g.getFontMetrics().stringWidth(barLabel) / 2);
+        g2d.rotate(-Math.PI / 2);
+        g2d.drawString(barLabel, 0, 0);
+        g2d.setTransform(originalAT);
+    }
+
+    private void paintHorizontalScaleBar(Graphics g, int yPosition, int xStart, int xEnd, String barLabel) {
+        Graphics2D g2d = (Graphics2D) g;
+        g2d.setStroke(new BasicStroke(axisLineWidth));
+
+        // Use dark theme color or custom axis color
+        g2d.setColor(scaleBarColor);
+
+        // Draw main axis line
+        g2d.drawLine(xStart, yPosition, xEnd, yPosition);
+
+        // Draw label
+        g2d.drawString(barLabel, (xStart + xEnd) / 2 - g.getFontMetrics(font).stringWidth(barLabel) / 2, yPosition - tickLength - 2);
     }
 
     private double getStepSize(double range, int steps) {
