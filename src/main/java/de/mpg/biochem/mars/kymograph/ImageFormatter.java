@@ -994,7 +994,7 @@ public class ImageFormatter {
      * Generate a composite image from a multi-channel image
      */
     private BufferedImage generateCompositeImage(ImagePlus mergedImage) {
-        CompositeImage ci = new CompositeImage(imp, CompositeImage.COMPOSITE);
+        CompositeImage ci = new CompositeImage(mergedImage, CompositeImage.COMPOSITE);
         for (int originalChannelIndex : multipleChannelsToShow) {
             // Apply contrast and LUT settings
             ci.setC(originalChannelIndex);
