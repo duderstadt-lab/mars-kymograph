@@ -279,14 +279,17 @@ public class DnaArchiveKymographBuilder
             imgPlus = applyVerticalReflection(imgPlus);
         }
 
-        Line line = new Line(dnaMolecule.getParameter("Dna_Top_X1") - minX,
-                dnaMolecule.getParameter("Dna_Top_Y1") - minY,
-                dnaMolecule.getParameter("Dna_Bottom_X2") - minX,
-                dnaMolecule.getParameter("Dna_Bottom_Y2") - minY);
+        // Interpolation enlarges the region, so the line and its width are
+        // enlarged by the same factor to follow the DNA in the larger image.
+        double scale = interpolationFactor > 1.0 ? interpolationFactor : 1.0;
+        Line line = new Line((dnaMolecule.getParameter("Dna_Top_X1") - minX) * scale,
+                (dnaMolecule.getParameter("Dna_Top_Y1") - minY) * scale,
+                (dnaMolecule.getParameter("Dna_Bottom_X2") - minX) * scale,
+                (dnaMolecule.getParameter("Dna_Bottom_Y2") - minY) * scale);
 
         // Build lines from the ROI
         LinesBuilder linesBuilder = new LinesBuilder(line);
-        linesBuilder.setLineWidth(width);
+        linesBuilder.setLineWidth((int) Math.max(1, Math.round(width * scale)));
         linesBuilder.build();
 
         Dataset dataset = convertService.convert(imgPlus, net.imagej.Dataset.class);

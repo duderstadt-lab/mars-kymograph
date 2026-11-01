@@ -334,8 +334,9 @@ public class MarsKymographUtils {
             int xDim, int yDim, double scaleFactor,
             ClampingNLinearInterpolatorFactory<T> interpolatorFactory) {
 
-        // Extend input with zero boundary extension
-        RandomAccessible<T> extendedInput = Views.extendZero(input);
+        // Extend input by repeating the border, so the edges are not darkened
+        // by interpolating with zeros outside the image
+        RandomAccessible<T> extendedInput = Views.extendBorder(input);
 
         // Create interpolator
         RealRandomAccessible<T> interpolant = Views.interpolate(extendedInput, interpolatorFactory);

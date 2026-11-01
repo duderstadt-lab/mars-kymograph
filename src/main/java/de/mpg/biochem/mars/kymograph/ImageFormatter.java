@@ -123,6 +123,14 @@ public class ImageFormatter {
 
     private int rescaleFactor = 1;
 
+    // Scales fonts, lines, ticks, margins and spacing so the figure keeps its
+    // look when the image is enlarged by interpolation or rescaling.
+    private double scale = 1;
+    // Scale applied while drawing. Only differs from 1 inside withScale.
+    private double activeScale = 1;
+    // Target distance between automatic ticks in pixels at scale 1.
+    private int tickSpacing = 50;
+
     private float axisLineWidth = 2.0f;
     private int tickLength = 5;
     private float tickLineWidth = 2.0f;
@@ -182,7 +190,7 @@ public class ImageFormatter {
     }
 
     public ImageFormatter setTitleFont(Font titleFont) {
-        font = titleFont;
+        title_font = titleFont;
         return this;
     }
 
@@ -254,6 +262,20 @@ public class ImageFormatter {
 
     public ImageFormatter setLUT(int c, String lut) {
         cToLUTName.put(c, lut);
+        return this;
+    }
+
+    /**
+     * Scale the decorations (fonts, line widths, tick lengths and spacing,
+     * margins and channel stack spacing) by this factor. Set it to the total
+     * enlargement of the image, for example interpolation times rescale, so
+     * the axes look the same at any resolution. Defaults to 1.
+     *
+     * @param scale The scale factor for the decorations
+     * @return This builder for method chaining
+     */
+    public ImageFormatter setScale(double scale) {
+        this.scale = scale > 0 ? scale : 1;
         return this;
     }
 
@@ -449,6 +471,58 @@ public class ImageFormatter {
     }
 
     public void build() {
+        withScale(this::buildScaled);
+    }
+
+    /**
+     * Run the action with the decorations scaled, restoring the unscaled
+     * values afterwards so the settings can be changed and built again.
+     */
+    private void withScale(Runnable action) {
+        int savedHorizontalMargin = horizontalMargin;
+        int savedVerticalMargin = verticalMargin;
+        int savedChannelStackspacing = channelStackspacing;
+        float savedAxisLineWidth = axisLineWidth;
+        int savedTickLength = tickLength;
+        float savedTickLineWidth = tickLineWidth;
+        int savedTickSpacing = tickSpacing;
+        Font savedFont = font;
+        Font savedLabelFont = label_font;
+        Font savedTitleFont = title_font;
+        try {
+            activeScale = scale;
+            horizontalMargin = px(horizontalMargin);
+            verticalMargin = px(verticalMargin);
+            channelStackspacing = px(channelStackspacing);
+            axisLineWidth = (float) (axisLineWidth * scale);
+            tickLength = px(tickLength);
+            tickLineWidth = (float) (tickLineWidth * scale);
+            tickSpacing = px(tickSpacing);
+            font = font.deriveFont((float) (font.getSize2D() * scale));
+            label_font = label_font.deriveFont((float) (label_font.getSize2D() * scale));
+            title_font = title_font.deriveFont((float) (title_font.getSize2D() * scale));
+            action.run();
+        } finally {
+            activeScale = 1;
+            horizontalMargin = savedHorizontalMargin;
+            verticalMargin = savedVerticalMargin;
+            channelStackspacing = savedChannelStackspacing;
+            axisLineWidth = savedAxisLineWidth;
+            tickLength = savedTickLength;
+            tickLineWidth = savedTickLineWidth;
+            tickSpacing = savedTickSpacing;
+            font = savedFont;
+            label_font = savedLabelFont;
+            title_font = savedTitleFont;
+        }
+    }
+
+    /** A distance in pixels at scale 1, scaled for drawing. */
+    private int px(int pixels) {
+        return (int) Math.round(pixels * activeScale);
+    }
+
+    private void buildScaled() {
         // If only showing a single channel, extract it before proceeding
         mergedImage = imp;
         if (singleChannelToShow > 0) {
@@ -512,7 +586,7 @@ public class ImageFormatter {
 
         // Add extra height for title if present
         if (title != null && !title.isEmpty()) {
-            fullHeight += title_font.getSize() + 10; // Add space for title
+            fullHeight += title_font.getSize() + px(10); // Add space for title
         }
 
         image = new BufferedImage(fullWidth, fullHeight, BufferedImage.TYPE_INT_ARGB);
@@ -1019,7 +1093,7 @@ public class ImageFormatter {
         Color currentAxisColor = darkTheme ? DARK_THEME_AXIS_COLOR : axisColor;
         g2d.setColor(currentAxisColor);
 
-        if (Double.isNaN(stepSize)) stepSize = getStepSize(valueRange, axisLength / 50);
+        if (Double.isNaN(stepSize)) stepSize = getStepSize(valueRange, axisLength / tickSpacing);
         g.setFont(font);
 
         // Draw main axis line
@@ -1063,7 +1137,7 @@ public class ImageFormatter {
         Color currentAxisColor = darkTheme ? DARK_THEME_AXIS_COLOR : axisColor;
         g2d.setColor(currentAxisColor);
 
-        if (Double.isNaN(stepSize)) stepSize = getStepSize(valueRange, axisLength / 50);
+        if (Double.isNaN(stepSize)) stepSize = getStepSize(valueRange, axisLength / tickSpacing);
         g.setFont(font);
 
         // Draw main axis line
@@ -1081,14 +1155,14 @@ public class ImageFormatter {
 
                     String label = String.format("%." + precision + "f", value);
                     g2d.drawString(label,
-                            xPosition + tickLength + 2,
+                            xPosition + tickLength + px(2),
                             yPos + g.getFontMetrics(font).getAscent()/2);
                 } else {
                     g2d.drawLine(xPosition - tickLength, yPos, xPosition, yPos);
 
                     String label = String.format("%." + precision + "f", value);
                     g2d.drawString(label,
-                            xPosition - tickLength - g.getFontMetrics(font).stringWidth(label) - 2,
+                            xPosition - tickLength - g.getFontMetrics(font).stringWidth(label) - px(2),
                             yPos + g.getFontMetrics(font).getAscent()/2);
                 }
             }
@@ -1100,11 +1174,11 @@ public class ImageFormatter {
             AffineTransform at = g2d.getTransform();
 
             if (rightSide) {
-                g2d.translate(xPosition + tickLength + g.getFontMetrics(font).getHeight() + 10,
+                g2d.translate(xPosition + tickLength + g.getFontMetrics(font).getHeight() + px(10),
                         yStart + axisLength / 2);
                 g2d.rotate(Math.PI / 2);
             } else {
-                g2d.translate(xPosition - tickLength - g.getFontMetrics(font).getHeight() - 10,
+                g2d.translate(xPosition - tickLength - g.getFontMetrics(font).getHeight() - px(10),
                         yStart + axisLength / 2);
                 g2d.rotate(-Math.PI / 2);
             }
@@ -1122,7 +1196,7 @@ public class ImageFormatter {
         Color currentAxisColor = darkTheme ? DARK_THEME_AXIS_COLOR : axisColor;
         g2d.setColor(currentAxisColor);
 
-        if (Double.isNaN(xStepSize)) xStepSize = getStepSize(bounds.width, imgPixelWidth / 50);
+        if (Double.isNaN(xStepSize)) xStepSize = getStepSize(bounds.width, imgPixelWidth / tickSpacing);
         g.setFont(font);
 
         // Draw main axis line
@@ -1165,7 +1239,7 @@ public class ImageFormatter {
         Color currentAxisColor = darkTheme ? DARK_THEME_AXIS_COLOR : axisColor;
         g2d.setColor(currentAxisColor);
 
-        if (Double.isNaN(yStepSize)) yStepSize = getStepSize(bounds.height, imgPixelHeight / 50);
+        if (Double.isNaN(yStepSize)) yStepSize = getStepSize(bounds.height, imgPixelHeight / tickSpacing);
         g.setFont(font);
 
         // Draw main axis line
@@ -1182,7 +1256,7 @@ public class ImageFormatter {
 
                 String label = String.format("%." + yaxis_precision + "f", y);
                 g2d.drawString(label,
-                        horizontalMargin - tickLength - g.getFontMetrics(font).stringWidth(label) - 2,
+                        horizontalMargin - tickLength - g.getFontMetrics(font).stringWidth(label) - px(2),
                         (int)p.y + g.getFontMetrics(font).getAscent()/2);
             }
         }
@@ -1212,7 +1286,7 @@ public class ImageFormatter {
 
         // Draw label
         AffineTransform originalAT = g2d.getTransform();
-        g2d.translate(xPosition - tickLength - 2,
+        g2d.translate(xPosition - tickLength - px(2),
                 (yStart + yEnd) / 2 + g.getFontMetrics().stringWidth(barLabel) / 2);
         g2d.rotate(-Math.PI / 2);
         g2d.drawString(barLabel, 0, 0);
@@ -1230,7 +1304,7 @@ public class ImageFormatter {
         g2d.drawLine(xStart, yPosition, xEnd, yPosition);
 
         // Draw label
-        g2d.drawString(barLabel, (xStart + xEnd) / 2 - g.getFontMetrics(font).stringWidth(barLabel) / 2, yPosition - tickLength - 2);
+        g2d.drawString(barLabel, (xStart + xEnd) / 2 - g.getFontMetrics(font).stringWidth(barLabel) / 2, yPosition - tickLength - px(2));
     }
 
     private double getStepSize(double range, int steps) {
@@ -1267,7 +1341,7 @@ public class ImageFormatter {
             svgGenerator.setSVGCanvasSize(new Dimension(image.getWidth(), image.getHeight()));
 
             // Draw content
-            drawToGraphics(mergedImage, svgGenerator);
+            withScale(() -> drawToGraphics(mergedImage, svgGenerator));
 
             // Write to file
             try (Writer out = new OutputStreamWriter(new FileOutputStream(path), "UTF-8")) {
